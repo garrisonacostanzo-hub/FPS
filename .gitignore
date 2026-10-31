@@ -45,3 +45,6 @@ Thumbs.db
 *.aab
 *.unitypackage
 *.app
+
+# Web build
+/web/node_modules/

@@ -1,0 +1,23 @@
+{
+  "name": "vanguard-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser FPS: offline single-player vs bots and online multiplayer (authoritative Node.js server) with multiple game modes.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node server/server.mjs",
+    "serve": "npm run build && npm start",
+    "test": "node scripts/simtest.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "three": "^0.187.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}
