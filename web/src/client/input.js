@@ -1,4 +1,6 @@
 // Keyboard / mouse input with pointer lock. Edge-triggered actions are latched until consumed.
+// If the browser (or an embedding iframe) refuses pointer lock, input falls back to a free-cursor mode
+// that still reads relative mouse motion; clicking in-game retries the real lock and Esc pauses.
 import { BTN } from '../shared/constants.js';
 import { settings } from './settings.js';
 
@@ -14,6 +16,7 @@ export class Input {
     this.aimToggled = false;
     this.enabled = true;
     this.locked = false;
+    this.fallback = false; // playing without pointer lock
     this.onLockChange = null;
 
     this._keydown = (e) => this.handleKey(e, true);
@@ -25,6 +28,7 @@ export class Input {
     };
     this._mousedown = (e) => {
       if (!this.locked) return;
+      if (this.fallback && e.target === this.canvas) this.tryLock(false);
       this.mouseButtons |= 1 << e.button;
       if (e.button === 0) this.latched.firePressed = true;
       if (e.button === 2 && settings.toggleAim) this.aimToggled = !this.aimToggled;
@@ -36,10 +40,14 @@ export class Input {
     };
     this._contextmenu = (e) => e.preventDefault();
     this._lock = () => {
-      this.locked = document.pointerLockElement === this.canvas;
+      const locked = document.pointerLockElement === this.canvas;
+      if (locked) this.fallback = false;
+      else if (this.fallback) return; // still playing in free-cursor mode
+      this.locked = locked;
       if (!this.locked) { this.keys.clear(); this.mouseButtons = 0; }
       if (this.onLockChange) this.onLockChange(this.locked);
     };
+    this._lockError = () => { if (this.wantLock) this.enterFallback(); };
 
     window.addEventListener('keydown', this._keydown);
     window.addEventListener('keyup', this._keyup);
@@ -49,6 +57,7 @@ export class Input {
     window.addEventListener('wheel', this._wheel, { passive: true });
     window.addEventListener('contextmenu', this._contextmenu);
     document.addEventListener('pointerlockchange', this._lock);
+    document.addEventListener('pointerlockerror', this._lockError);
   }
 
   dispose() {
@@ -60,21 +69,53 @@ export class Input {
     window.removeEventListener('wheel', this._wheel);
     window.removeEventListener('contextmenu', this._contextmenu);
     document.removeEventListener('pointerlockchange', this._lock);
+    document.removeEventListener('pointerlockerror', this._lockError);
+    this.fallback = false;
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
+  /** Starts playing: pointer lock if the browser allows it, otherwise free-cursor fallback. */
   requestLock() {
-    if (!this.locked && this.canvas.requestPointerLock) {
+    if (this.locked) return;
+    this.tryLock(true);
+  }
+
+  tryLock(fallbackOnFailure) {
+    this.wantLock = fallbackOnFailure;
+    const fail = () => { if (fallbackOnFailure) this.enterFallback(); };
+    if (!this.canvas.requestPointerLock) { fail(); return; }
+    const plain = () => {
       try {
-        const result = this.canvas.requestPointerLock({ unadjustedMovement: true });
-        if (result && result.catch) result.catch(() => this.canvas.requestPointerLock());
-      } catch {
-        this.canvas.requestPointerLock();
-      }
+        const r = this.canvas.requestPointerLock();
+        if (r && r.catch) r.catch(fail);
+      } catch { fail(); }
+    };
+    try {
+      const result = this.canvas.requestPointerLock({ unadjustedMovement: true });
+      if (result && result.catch) result.catch(plain); // raw input unsupported: retry without it
+    } catch {
+      plain();
     }
   }
 
+  enterFallback() {
+    this.wantLock = false;
+    if (this.locked) return;
+    this.fallback = true;
+    this.locked = true;
+    if (this.onLockChange) this.onLockChange(true);
+  }
+
   releaseLock() {
+    this.wantLock = false;
+    if (this.fallback) {
+      this.fallback = false;
+      this.locked = false;
+      this.keys.clear();
+      this.mouseButtons = 0;
+      if (this.onLockChange) this.onLockChange(false);
+      return;
+    }
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
@@ -83,6 +124,7 @@ export class Input {
     const code = e.code;
     if (down) {
       if (code === 'Tab') { e.preventDefault(); }
+      if (code === 'Escape' && this.fallback) { this.releaseLock(); return; }
       if (!this.locked && code !== 'Tab') return;
       if (!this.keys.has(code)) {
         if (code === 'Space') this.latched.jump = true;

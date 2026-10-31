@@ -76,6 +76,8 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 | Chat | `T` / `Enter` |
 | Pause / menu | `Esc` |
 
+If the browser or an embedding frame refuses mouse capture (pointer lock), the game switches to free-cursor mouse look. Clicking in-game tries to capture the mouse again.
+
 **Settings** covers name, sensitivity, ADS sensitivity, FOV, invert Y, volume, crosshair color and size, graphics quality, and the hold/toggle choices. Settings are saved in `localStorage`.
 
 ## Weapons
