@@ -10,8 +10,38 @@
 <body>
   <canvas id="game"></canvas>
   <div id="hud"></div>
-  <div id="menu"></div>
-  <noscript><p style="color:#fff;padding:2rem">VANGUARD needs JavaScript and WebGL.</p></noscript>
+  <div id="menu">
+    <div class="boot">
+      <div class="logo">VANGUARD<span>TACTICAL FPS</span></div>
+      <p class="boot-loading">Loading…</p>
+      <div class="boot-help">
+        <h2>Still seeing this screen?</h2>
+        <p>The app you opened this file with is not running the game's code. This happens in <b>file previews</b>:
+          phone file viewers, chat or email attachment previews, cloud-drive previews and some built-in viewers.</p>
+        <p><b>Fix:</b> save <code>VANGUARD.html</code> to your computer, then open it with a web browser:
+          <b>Chrome, Edge, Firefox or Safari</b>. On Windows or Mac you can right-click the file → <i>Open with</i> → your browser.</p>
+        <p>VANGUARD is played on a computer with a keyboard and mouse.</p>
+      </div>
+      <pre class="boot-error" id="boot-error"></pre>
+    </div>
+  </div>
+  <script>
+    // Plain-ES5 startup guard: if the game fails to start (old browser, blocked feature), say why on screen.
+    (function () {
+      function show(msg) {
+        if (window.__vanguardBooted) return;
+        var el = document.getElementById('boot-error');
+        if (!el) return;
+        el.style.display = 'block';
+        var hide = document.querySelectorAll('.boot-help, .boot-loading');
+        for (var i = 0; i < hide.length; i++) hide[i].style.display = 'none';
+        el.textContent = 'VANGUARD could not start in this browser.\n\n' + msg + '\n\nBrowser: ' + navigator.userAgent +
+          '\n\nTry the latest Chrome, Edge, Firefox or Safari. If it still fails, send this text to whoever gave you the file.';
+      }
+      window.addEventListener('error', function (e) { show((e.error && e.error.stack) || e.message || String(e)); });
+      window.addEventListener('unhandledrejection', function (e) { var r = e.reason; show(String((r && (r.stack || r.message)) || r)); });
+    })();
+  </script>
   <script>/*__JS__*/</script>
 </body>
 </html>

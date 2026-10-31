@@ -6,6 +6,19 @@ import { PRIMARY_WEAPONS, WEAPONS } from '../shared/weapons.js';
 import { CODE_LENGTH, normalizeCode, webrtcSupported } from './net.js';
 import { saveSettings, settings } from './settings.js';
 
+/** True if this browser can create a WebGL 2 context (required by the renderer). */
+export function detectWebGL2() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    if (!gl) return false;
+    const lose = gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class MainMenu {
@@ -19,6 +32,7 @@ export class MainMenu {
     this.status = '';
     this.busy = false;
     this.joinCode = '';
+    this.webgl = detectWebGL2();
     this.render();
   }
 
@@ -28,6 +42,7 @@ export class MainMenu {
     this.busy = false;
     this.root.style.display = 'flex';
     this.render();
+    this.root.scrollTop = 0;
   }
 
   hide() {
@@ -48,6 +63,7 @@ export class MainMenu {
           <nav>${tabs.map(([id, label]) => `<button class="tab ${this.tab === id ? 'on' : ''}" data-tab="${id}">${label}</button>`).join('')}</nav>
           <label class="name">CALLSIGN <input id="m-name" maxlength="18" value="${esc(settings.name)}"></label>
         </header>
+        ${this.renderBanner()}
         <main>${this.renderTab()}</main>
         <footer>One file, no install: offline matches run in your browser · online matches are hosted by a player's browser and joined with a room code</footer>
       </div>`;
@@ -56,6 +72,16 @@ export class MainMenu {
     if (this.tab === 'offline') this.bindOffline();
     if (this.tab === 'online') this.bindOnline();
     if (this.tab === 'settings') this.bindSettings();
+  }
+
+  renderBanner() {
+    if (!this.webgl) {
+      return `<div class="banner"><b>3D graphics (WebGL 2) are turned off or unavailable in this browser, so matches can't start.</b><br>
+        Fix: turn on hardware acceleration (Chrome/Edge: Settings → System → <i>Use graphics acceleration when available</i>, then restart the browser),
+        update your graphics driver, or open VANGUARD.html in another browser (Firefox, Chrome, Edge, Safari).</div>`;
+    }
+    if (this.status && this.tab !== 'online') return `<div class="banner">${esc(this.status)}</div>`;
+    return '';
   }
 
   renderTab() {

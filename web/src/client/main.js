@@ -36,20 +36,35 @@ const menu = new MainMenu(menuRoot, {
 
 function startSession(transport, welcome, fromGesture) {
   if (!welcome) return;
-  menu.hide();
   canvas.style.display = 'block';
-  session = new ClientSession({
-    transport,
-    welcome,
-    canvas,
-    hudRoot,
-    audio,
-    onExit: (t, reason) => {
-      session = null;
-      canvas.style.display = 'none';
-      menu.show(t.offline ? 'offline' : 'online', reason || '');
-    },
-  });
+  try {
+    session = new ClientSession({
+      transport,
+      welcome,
+      canvas,
+      hudRoot,
+      audio,
+      onExit: (t, reason) => {
+        session = null;
+        canvas.style.display = 'none';
+        menu.show(t.offline ? 'offline' : 'online', reason || '');
+      },
+    });
+  } catch (err) {
+    // Typically WebGL being unavailable. Return to the menu with an explanation instead of a blank screen.
+    console.error(err);
+    session = null;
+    canvas.style.display = 'none';
+    hudRoot.innerHTML = '';
+    hudRoot.classList.remove('active');
+    try { transport.close(); } catch { /* ignore */ }
+    const text = String((err && err.message) || err);
+    menu.show(transport.offline ? 'offline' : 'online', /webgl/i.test(text)
+      ? 'The match could not start because this browser could not create 3D graphics (WebGL). Turn on hardware acceleration in your browser settings, update your graphics driver, or try another browser.'
+      : 'The match could not start: ' + text);
+    return;
+  }
+  menu.hide();
   window.__vanguard = session;
   if (fromGesture) session.resume();
 }
@@ -58,3 +73,5 @@ function startSession(transport, welcome, fromGesture) {
 const closeOnline = () => { if (session && !session.offline) session.transport.close(); };
 window.addEventListener('beforeunload', closeOnline);
 window.addEventListener('pagehide', closeOnline);
+
+window.__vanguardBooted = true;

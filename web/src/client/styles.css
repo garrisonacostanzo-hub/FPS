@@ -208,3 +208,14 @@ label.check { flex-direction: row !important; align-items: center; gap: 10px !im
 #chat-log div.fade { opacity: 0; }
 #chat-input { position: absolute; left: 22px; bottom: 100px; width: 420px; display: none; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid var(--accent); border-radius: 6px; padding: 7px 10px; pointer-events: auto; }
 #netstats { position: absolute; right: 22px; top: 50%; color: rgba(255,255,255,0.45); font-size: 11px; letter-spacing: 1px; writing-mode: horizontal-tb; }
+
+/* Boot screen: shown until the game's script replaces it with the menu. */
+.boot { margin: auto; max-width: 640px; padding: 32px; display: flex; flex-direction: column; gap: 14px; }
+.boot-loading { color: var(--muted); letter-spacing: 3px; margin: 0; }
+.boot-help { opacity: 0; animation: boot-help-in .4s ease 2.5s forwards; background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 14px; padding: 6px 20px 10px; line-height: 1.55; }
+.boot-help h2 { font-size: 17px; margin: 12px 0 4px; color: var(--accent); }
+.boot-help code { color: var(--accent); }
+.boot-error { display: none; white-space: pre-wrap; word-break: break-word; background: rgba(255,74,61,0.12); border: 1px solid rgba(255,74,61,0.5); color: #ffd0cc; border-radius: 12px; padding: 14px 16px; font-size: 12px; max-height: 50vh; overflow: auto; }
+@keyframes boot-help-in { to { opacity: 1; } }
+.banner { background: rgba(255,74,61,0.12); border: 1px solid rgba(255,74,61,0.5); color: #ffd0cc; border-radius: 12px; padding: 12px 16px; line-height: 1.5; font-size: 14px; }
+.banner b { color: #fff; }
