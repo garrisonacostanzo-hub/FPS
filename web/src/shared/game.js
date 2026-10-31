@@ -1,4 +1,4 @@
-// Authoritative game simulation. Runs on the Node.js server for online play and inside the browser for offline
+// Authoritative game simulation. Runs in the host player's browser for online play and in your own tab for offline
 // play (same code path), so offline and online behave identically.
 import { BOT_NAMES, DIFFICULTY, HISTORY_SECONDS, MAX_REWIND, PLAYER, TEAM, TEAM_NAMES, TICK_RATE } from './constants.js';
 import { BotBrain } from './bots.js';

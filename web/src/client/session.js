@@ -27,7 +27,11 @@ export class ClientSession {
     this.teams = this.modeInfo.teams;
     this.config = welcome.cfg;
     this.offline = transport.offline;
+    this.isHost = !!transport.isHost;
+    this.roomCode = transport.code || '';
     this.interpDelay = this.offline ? 0.07 : 0.1;
+    this.lastSnapT = -Infinity;
+    this.exitReason = '';
 
     this.map = buildMap(welcome.map);
     this.world = new World(this.map.boxes, this.map.half + 2);
@@ -41,6 +45,8 @@ export class ClientSession {
       map: this.map,
       modeId: this.modeId,
       online: !this.offline,
+      isHost: this.isHost,
+      roomCode: this.roomCode,
       onLeave: () => this.leave(),
       onResume: () => this.resume(),
       onPlayAgain: () => this.playAgain(),
@@ -125,6 +131,7 @@ export class ClientSession {
         return undefined;
       case 'kicked':
       case 'roomClosed':
+        this.exitReason = msg.reason || 'The match was closed.';
         this.leave();
         return undefined;
       default:
@@ -144,6 +151,9 @@ export class ClientSession {
   }
 
   onSnapshot(snap) {
+    // Snapshots travel on an unordered channel online: ignore any that arrive after a newer one.
+    if (snap.t <= this.lastSnapT) return undefined;
+    this.lastSnapT = snap.t;
     const now = performance.now() / 1000;
     const sample = snap.t - now;
     if (this.serverOffset === null) this.serverOffset = sample;
@@ -318,9 +328,8 @@ export class ClientSession {
     this.unsubscribeSettings();
     this.hud.destroy();
     this.renderer.dispose();
-    if (this.transport.offline) this.transport.close();
-    else this.transport.send({ type: 'leaveRoom' });
-    if (this.onExit) this.onExit(this.transport);
+    this.transport.close();
+    if (this.onExit) this.onExit(this.transport, this.exitReason);
   }
 
   // ==============================================================================================
@@ -378,7 +387,8 @@ export class ClientSession {
     if (this.fpsTime > 0.5) {
       this.fps = Math.round(this.fpsFrames / this.fpsTime);
       this.fpsFrames = 0; this.fpsTime = 0;
-      this.hud.setNetStats(`${this.fps} FPS${this.offline ? ' · OFFLINE' : ` · ${this.rtt} ms`}`);
+      const net = this.offline ? ' · OFFLINE' : this.isHost ? ` · HOSTING · ROOM ${this.roomCode}` : ` · ${this.rtt} ms · ROOM ${this.roomCode}`;
+      this.hud.setNetStats(`${this.fps} FPS${net}`);
     }
   }
 

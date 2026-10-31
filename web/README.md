@@ -1,44 +1,45 @@
-# VANGUARD — browser FPS (HTML5 / Three.js)
+# VANGUARD — browser FPS in one HTML file
 
-A playable first-person shooter that runs in the browser. It has three ways to play:
+A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Download it and double-click it. There's nothing to install and no server to run. The same file has:
 
-* **Offline single-player against bots.** Open one HTML file. No server and no install.
-* **Online multiplayer.** A small Node.js server runs authoritative rooms. Humans and bots play in the same match.
+* **Offline single-player against bots.**
+* **Online multiplayer.** One player hosts in their browser and friends join with a 5-character room code. Humans and bots play in the same match.
 * **Six game modes on three maps.** Every mode works both offline and online.
 
-## Play offline (no install)
+## Play offline
 
-Open **`web/dist/index.html`** in Chrome, Edge or Firefox (double-clicking it works, `file://` is fine). Then:
-
-1. Choose **Offline**.
-2. Pick a mode, a map, the bot count and the bot difficulty.
+1. Open **`VANGUARD.html`** in Chrome, Edge, Firefox or Safari. Double-clicking it works and no web server is needed.
+2. Go to **PLAY OFFLINE** and pick a mode, a map, the bot count and the bot difficulty.
 3. Choose your primary weapon and click **DEPLOY**.
 4. Click inside the game to capture the mouse.
 
-The page is self-contained (≈700 KB, Three.js bundled in), so you can copy it anywhere.
-
 ## Play online
+
+Every player needs **the same `VANGUARD.html`** and an internet connection.
+
+**Host:**
+1. Go to **PLAY ONLINE → HOST A MATCH**.
+2. Pick the mode, map, bots and difficulty, then click **HOST MATCH**.
+3. You get a room code like `K7QX3`. It appears in the pause menu (with a COPY button) and in the corner of the screen.
+4. Send the code to your friends.
+
+**Friends:** go to **PLAY ONLINE**, type the code under **JOIN A MATCH**, then click **JOIN**.
+
+Some rules:
+* Up to 8 players per match. Bots fill out the teams.
+* **The match runs in the host's browser.** The host should keep that tab open. Their game keeps running if they switch tabs, but if the host leaves or closes the tab, the match ends for everyone.
+* Players connect directly to the host's browser over WebRTC. The free public [PeerJS](https://peerjs.com) service is used only to find the host from the room code. If a strict network blocks a direct connection, PeerJS's public relay is tried automatically.
+* Online play doesn't work inside sandboxed embeds that block WebRTC (such as Claude's artifact viewer). Open the file directly in a browser.
+* Advanced: to use your own PeerJS signaling server, open `VANGUARD.html?signal=your-host:9000`. Everyone in a match must use the same server.
+
+## Build from source
 
 ```bash
 cd web
-npm install          # three, ws, esbuild
-npm run serve        # builds dist/index.html and starts the server on :8080
+npm install       # three, peerjs, esbuild
+npm run build     # writes dist/VANGUARD.html
+npm test          # headless simulation of every mode × map with bots (pathing, combat, scoring, replication)
 ```
-
-* On the machine running the server, open **http://localhost:8080**.
-* Other players on your LAN open **http://YOUR-IP:8080**. Find the IP with `ipconfig` on Windows or `ip addr` / `ifconfig` on macOS and Linux. Allow port 8080 through the firewall.
-* In the menu, go to **Online → Connect**. Then **create a room** (mode, map, bots, difficulty) or **join** one from the list.
-* The WebSocket URL defaults to the page's own host. You can change it under **Online** to connect to a different server.
-
-For internet play, run the server on any VPS or Node host, or put it behind a reverse proxy with TLS. The client switches to `wss://` automatically when the page is served over HTTPS.
-
-| Env var | Default | Meaning |
-|---|---|---|
-| `PORT` | `8080` | HTTP + WebSocket port (`/ws`) |
-| `MAX_ROOMS` | `20` | Concurrent rooms |
-| `MAX_PLAYERS` | `12` | Humans per room (bots fill the rest) |
-
-Other scripts: `npm run build` (bundle only), `npm start` (server only), and `npm test`. The test runs a headless simulation of every mode × map with bots and checks pathing, combat, scoring and replication.
 
 ## Game modes
 
@@ -102,25 +103,26 @@ Difficulty: **Easy / Normal / Hard / Elite**. It scales reaction time, accuracy,
 
 ## Networking
 
-Everything runs on one simulation (`src/shared`). The Node server runs it for each room, and the browser runs the same code for offline play through an in-memory transport. Offline and online therefore behave the same.
+Every match runs on the same authoritative simulation (`src/shared`). For offline play it runs in your tab. For online play it runs in the host's tab, and the guests connect peer-to-peer. Offline and online therefore behave the same.
 
-* **Server-authoritative.** The tick runs at 30 Hz. Snapshots go out at 20 Hz online (30 Hz offline), and each one carries the receiving player's acknowledged command sequence.
+* **Host-authoritative.** The host's browser runs the 30 Hz simulation and decides every hit, kill and score. A Web Worker timer keeps the host's match running even when its tab is in the background.
+* **Transport.** Each guest has one reliable WebRTC data channel (commands, events, roster) and one unreliable, unordered channel for snapshots. A lost snapshot is skipped instead of stalling the game, and stale ones are ignored. Snapshots go out at 20 Hz online (30 Hz offline), and each one carries the guest's acknowledged command sequence.
+* **Disconnects.** A guest who closes their tab is removed immediately. A lost connection is detected within about 10 s. If the host disappears, the guests return to the menu with a message.
 * **Client-side prediction.** The client sends 60 Hz input commands in batches. It predicts movement *and* weapon state (ammo, fire rate, reload). On each snapshot it reconciles by replaying unacknowledged commands, with smooth error correction.
-* **Lag compensation.** The server keeps a 0.3 s history of every player's hitboxes. It rewinds them to the shooter's view time (`cmd.vt`) before tracing shots. Spread is seeded deterministically, so the predicted tracer matches the server's.
-* **Interpolation.** Remote players and bots are interpolated about 100 ms behind server time, using an estimated clock offset.
-* **Anti-cheat basics.** Inputs are sanitized and clamped. Each player has a command budget (no speed hacks). Damage, kills and scoring are server-only.
+* **Lag compensation.** The host keeps a 0.3 s history of every player's hitboxes. It rewinds them to the shooter's view time (`cmd.vt`) before tracing shots. Spread is seeded deterministically, so the predicted tracer matches the host's.
+* **Interpolation.** Remote players and bots are interpolated about 100 ms behind host time, using an estimated clock offset.
+* **Fair play.** The host sanitizes and clamps all guest inputs. Each player has a command budget (no speed hacks), and only the host can apply damage, kills and scores. The host is trusted, so play with friends.
 
 ## Source layout
 
 ```
 web/
-├─ dist/index.html          # built single-file game (commit-ready, works offline)
-├─ server/server.mjs        # HTTP + WebSocket server, lobby & rooms
+├─ dist/VANGUARD.html       # the built game: one self-contained file (offline + online)
 ├─ scripts/
 │  ├─ build.mjs             # esbuild → one inlined HTML file
 │  └─ simtest.mjs           # headless simulation test (npm test)
 └─ src/
-   ├─ shared/               # deterministic game simulation (runs on server AND in browser)
+   ├─ shared/               # deterministic game simulation (offline tab or online host tab)
    │  ├─ constants.js       # tick rates, movement, difficulty tables, teams
    │  ├─ math.js            # vector/angle helpers, seeded RNG, ray tests
    │  ├─ world.js           # AABB collision world + raycasts (grid broadphase)
@@ -132,12 +134,12 @@ web/
    │  ├─ bots.js            # bot brain: perception, FSM, steering, aim
    │  ├─ modes.js           # TDM / DOM / FFA / Gun Game / Elimination / Horde
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
-   │  └─ host.js            # fixed-tick host, client bindings, network messages
+   │  └─ host.js            # fixed-tick match host, client bindings, network messages
    └─ client/               # browser only
       ├─ main.js            # entry: menu ↔ session
-      ├─ menu.js            # offline / online lobby / settings / controls
+      ├─ menu.js            # offline setup / host & join by code / settings / controls
       ├─ session.js         # prediction, reconciliation, interpolation, game loop
-      ├─ net.js             # LocalTransport (offline) & WsTransport (online)
+      ├─ net.js             # LocalTransport (offline), HostTransport & JoinTransport (WebRTC via PeerJS)
       ├─ renderer.js        # Three.js scene, characters, view model, effects
       ├─ hud.js             # HUD, killfeed, scoreboard, minimap, menus
       ├─ input.js           # pointer lock, keyboard/mouse
@@ -151,4 +153,4 @@ web/
 
 * Rendering uses merged geometry per material, procedural textures, shadow mapping and pooled effects. The **Quality** setting adjusts pixel ratio, antialiasing and shadows.
 * Every texture and sound is generated at runtime. There are no asset files.
-* After editing anything in `src/`, run `npm run build` to regenerate `dist/index.html`.
+* After editing anything in `src/`, run `npm run build` to regenerate `dist/VANGUARD.html`.

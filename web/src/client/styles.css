@@ -65,6 +65,12 @@ aside { background: var(--panel); border: 1px solid var(--line); border-radius: 
 .mini.join { background: rgba(255,176,46,0.15); border-color: var(--accent); color: var(--accent); }
 .connect { display: flex; gap: 10px; }
 .connect input { flex: 1; }
+.join-row { display: flex; gap: 10px; }
+.join-row input { flex: 1; min-width: 0; font-size: 26px !important; letter-spacing: 8px; text-transform: uppercase; text-align: center; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.host-row { display: flex; gap: 16px; align-items: center; margin-bottom: 4px; }
+.host-row .start { margin: 0; min-width: 240px; }
+.host-row .note { margin: 0; }
+.busy { opacity: 0.6; pointer-events: none; }
 .status { color: var(--accent); min-height: 1.2em; }
 table.rooms { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; }
 table.rooms th, table.rooms td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); font-size: 13px; }
@@ -187,7 +193,11 @@ label.check { flex-direction: row !important; align-items: center; gap: 10px !im
 #pause { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(5,8,12,0.6); pointer-events: auto; }
 #pause .panel { background: rgba(14,18,25,0.95); border: 1px solid var(--line); border-radius: 16px; padding: 22px 28px; width: min(460px, 92vw); display: flex; flex-direction: column; gap: 12px; }
 #pause h2 { margin: 0; letter-spacing: 4px; }
-#pause .sub { margin: 0; color: var(--muted); font-size: 12px; }
+#pause .sub { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+#pause .room-code { display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+#pause .room-code span { color: var(--muted); font-size: 11px; letter-spacing: 2px; }
+#pause .room-code b { font-size: 26px; letter-spacing: 6px; color: var(--accent); user-select: all; font-family: ui-monospace, Menlo, Consolas, monospace; }
+#pause .room-code button { margin-left: auto; padding: 8px 14px; }
 #pause label { display: grid; grid-template-columns: 1fr 160px 40px; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
 #pause label.check { display: flex; }
 #pause select { background: rgba(0,0,0,0.35); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px; grid-column: span 2; }

@@ -9,12 +9,14 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class Hud {
-  constructor(root, { map, modeId, online, onLeave, onResume, onPlayAgain, onChat, onLoadout }) {
+  constructor(root, { map, modeId, online, isHost, roomCode, onLeave, onResume, onPlayAgain, onChat, onLoadout }) {
     this.root = root;
     this.map = map;
     this.modeId = modeId;
     this.mode = MODE_LIST.find((m) => m.id === modeId) || MODE_LIST[0];
     this.online = online;
+    this.isHost = !!isHost;
+    this.roomCode = roomCode || '';
     this.callbacks = { onLeave, onResume, onPlayAgain, onChat, onLoadout };
     this.root.innerHTML = TEMPLATE;
     this.root.classList.add('active');
@@ -308,7 +310,14 @@ export class Hud {
     el.innerHTML = `
       <div class="panel">
         <h2>PAUSED</h2>
-        <p class="sub">${this.online ? 'Online match — the game keeps running.' : 'Offline match — the game keeps running.'}</p>
+        ${this.online ? `
+        <div class="room-code">
+          <span>ROOM CODE</span><b>${this.roomCode}</b><button data-act="copy">COPY</button>
+        </div>
+        <p class="sub">${this.isHost
+          ? 'You are hosting: friends open VANGUARD.html, choose PLAY ONLINE and enter this code. Keep this tab open — the match runs in your browser.'
+          : 'Online match — the game keeps running while paused.'}</p>`
+          : '<p class="sub">Offline match — the game keeps running.</p>'}
         <label>Mouse sensitivity <input type="range" min="0.1" max="4" step="0.05" data-k="sensitivity" value="${settings.sensitivity}"><output></output></label>
         <label>Aim sensitivity <input type="range" min="0.2" max="1.5" step="0.05" data-k="adsSensitivity" value="${settings.adsSensitivity}"><output></output></label>
         <label>Field of view <input type="range" min="60" max="110" step="1" data-k="fov" value="${settings.fov}"><output></output></label>
@@ -319,7 +328,7 @@ export class Hud {
         <label class="check"><input type="checkbox" data-k="invertY" ${settings.invertY ? 'checked' : ''}> Invert mouse Y</label>
         <label class="check"><input type="checkbox" data-k="toggleCrouch" ${settings.toggleCrouch ? 'checked' : ''}> Toggle crouch</label>
         <label class="check"><input type="checkbox" data-k="toggleAim" ${settings.toggleAim ? 'checked' : ''}> Toggle aim</label>
-        <div class="row"><button data-act="resume" class="primary">RESUME</button><button data-act="leave" class="danger">LEAVE MATCH</button></div>
+        <div class="row"><button data-act="resume" class="primary">RESUME</button><button data-act="leave" class="danger">${this.isHost ? 'END MATCH FOR ALL' : 'LEAVE MATCH'}</button></div>
       </div>`;
     el.querySelectorAll('input, select').forEach((input) => {
       const out = input.parentElement.querySelector('output');
@@ -336,6 +345,23 @@ export class Hud {
     });
     el.querySelector('[data-act="resume"]').addEventListener('click', () => this.callbacks.onResume && this.callbacks.onResume());
     el.querySelector('[data-act="leave"]').addEventListener('click', () => this.callbacks.onLeave && this.callbacks.onLeave());
+    const copy = el.querySelector('[data-act="copy"]');
+    if (copy) {
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(this.roomCode);
+          copy.textContent = 'COPIED';
+        } catch {
+          copy.textContent = 'SELECT & COPY';
+          const range = document.createRange();
+          range.selectNodeContents(el.querySelector('.room-code b'));
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        setTimeout(() => { copy.textContent = 'COPY'; }, 1500);
+      });
+    }
   }
 
   showPause(show) {

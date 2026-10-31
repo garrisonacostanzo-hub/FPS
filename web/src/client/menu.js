@@ -1,30 +1,33 @@
-// Main menu: offline match setup, online lobby (rooms), settings and controls.
-import { DIFFICULTY, GAME_TITLE } from '../shared/constants.js';
+// Main menu: offline match setup, online host/join by room code, settings and controls.
+import { DIFFICULTY, GAME_TITLE, MAX_ONLINE_PLAYERS } from '../shared/constants.js';
 import { MAP_LIST } from '../shared/map.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { PRIMARY_WEAPONS, WEAPONS } from '../shared/weapons.js';
-import { WsTransport } from './net.js';
+import { CODE_LENGTH, normalizeCode, webrtcSupported } from './net.js';
 import { saveSettings, settings } from './settings.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class MainMenu {
-  constructor(root, { onStartOffline, onStartOnline, audio }) {
+  constructor(root, { onStartOffline, onHost, onJoin, audio }) {
     this.root = root;
     this.onStartOffline = onStartOffline;
-    this.onStartOnline = onStartOnline;
+    this.onHost = onHost;
+    this.onJoin = onJoin;
     this.audio = audio;
     this.tab = 'offline';
-    this.transport = null;
-    this.rooms = [];
+    this.status = '';
+    this.busy = false;
+    this.joinCode = '';
     this.render();
   }
 
-  show(tab) {
+  show(tab, status) {
     if (tab) this.tab = tab;
+    this.status = status || '';
+    this.busy = false;
     this.root.style.display = 'flex';
     this.render();
-    if (this.tab === 'online' && this.transport) this.requestRooms();
   }
 
   hide() {
@@ -46,9 +49,9 @@ export class MainMenu {
           <label class="name">CALLSIGN <input id="m-name" maxlength="18" value="${esc(settings.name)}"></label>
         </header>
         <main>${this.renderTab()}</main>
-        <footer>Offline matches run entirely in your browser · Online play needs the Vanguard server (<code>npm start</code>)</footer>
+        <footer>One file, no install: offline matches run in your browser · online matches are hosted by a player's browser and joined with a room code</footer>
       </div>`;
-    this.root.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { this.click(); this.tab = b.dataset.tab; this.render(); if (this.tab === 'online' && this.transport) this.requestRooms(); }));
+    this.root.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { if (this.busy) return; this.click(); this.tab = b.dataset.tab; this.status = ''; this.render(); }));
     this.root.querySelector('#m-name').addEventListener('change', (e) => saveSettings({ name: e.target.value.trim().slice(0, 18) || settings.name }));
     if (this.tab === 'offline') this.bindOffline();
     if (this.tab === 'online') this.bindOnline();
@@ -90,16 +93,25 @@ export class MainMenu {
       <div class="two-col">
         ${this.renderMatchSetup('o', settings)}
         <aside>
-          <h3>LOADOUT</h3>
-          <div class="weapons">${PRIMARY_WEAPONS.map((id) => {
-            const w = WEAPONS[id];
-            return `<button class="weapon ${settings.primary === id ? 'on' : ''}" data-primary="${id}"><b>${w.name}</b>
-              <span class="stats"><i style="width:${Math.min(100, w.damage * w.pellets / 1.0)}%"></i></span><small>DMG ${w.damage}${w.pellets > 1 ? '×' + w.pellets : ''} · ${w.rpm} RPM · ${w.mag} RDS</small></button>`;
-          }).join('')}</div>
-          <p class="note">Secondary: ${WEAPONS.pistol.name}. Gun Game overrides your loadout.</p>
+          ${this.renderLoadout()}
           <button class="start" id="start-offline">DEPLOY</button>
         </aside>
       </div>`;
+  }
+
+  renderLoadout() {
+    return `
+      <h3>LOADOUT</h3>
+      <div class="weapons">${PRIMARY_WEAPONS.map((id) => {
+        const w = WEAPONS[id];
+        return `<button class="weapon ${settings.primary === id ? 'on' : ''}" data-primary="${id}"><b>${w.name}</b>
+          <span class="stats"><i style="width:${Math.min(100, w.damage * w.pellets / 1.0)}%"></i></span><small>DMG ${w.damage}${w.pellets > 1 ? '×' + w.pellets : ''} · ${w.rpm} RPM · ${w.mag} RDS</small></button>`;
+      }).join('')}</div>
+      <p class="note">Secondary: ${WEAPONS.pistol.name}. Gun Game overrides your loadout.</p>`;
+  }
+
+  bindLoadout() {
+    this.root.querySelectorAll('[data-primary]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ primary: b.dataset.primary }); this.render(); }));
   }
 
   bindOffline() {
@@ -107,7 +119,7 @@ export class MainMenu {
     root.querySelectorAll('[data-omode]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ mode: b.dataset.omode }); this.render(); }));
     root.querySelectorAll('[data-omap]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ map: b.dataset.omap }); this.render(); }));
     root.querySelectorAll('[data-odiff]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ difficulty: b.dataset.odiff }); this.render(); }));
-    root.querySelectorAll('[data-primary]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ primary: b.dataset.primary }); this.render(); }));
+    this.bindLoadout();
     const bots = root.querySelector('#obots');
     bots.addEventListener('input', () => { bots.nextElementSibling.textContent = bots.value; saveSettings({ bots: parseInt(bots.value, 10) }); });
     root.querySelector('#start-offline').addEventListener('click', () => {
@@ -117,105 +129,87 @@ export class MainMenu {
   }
 
   // ------------------------------------------------------------------------------------------------
+  hostValues() {
+    return { mode: settings.hostMode, map: settings.hostMap, bots: settings.hostBots, difficulty: settings.hostDifficulty };
+  }
+
   renderOnline() {
-    const connected = this.transport && this.transport.ws && this.transport.ws.readyState === WebSocket.OPEN;
-    const fileNote = window.location.protocol === 'file:' ? '<p class="note warn">This page was opened from a file. Start the server with <code>npm start</code> and open <code>http://localhost:8080</code> (or enter a server address below).</p>' : '';
-    if (!connected) {
-      return `
-        <section class="online">
-          <h3>CONNECT TO SERVER</h3>
-          ${fileNote}
-          <div class="connect">
-            <input id="server-url" value="${esc(settings.serverUrl || WsTransport.defaultUrl())}" placeholder="ws://host:8080/ws">
-            <button class="start small" id="connect">CONNECT</button>
-          </div>
-          <p class="status" id="online-status">${esc(this.status || '')}</p>
-          <p class="note">Host your own server: <code>cd web && npm install && npm run serve</code>, then friends open <code>http://YOUR-IP:8080</code>. Bots fill every room and step aside as humans join.</p>
-        </section>`;
-    }
-    const createValues = this.createValues || { mode: 'tdm', map: 'outpost', bots: 9, difficulty: 'normal' };
-    this.createValues = createValues;
+    const unsupported = !webrtcSupported()
+      ? '<p class="note warn">This browser (or the page embedding this game) blocks peer-to-peer connections, so online play is unavailable here. Open VANGUARD.html directly in Chrome, Edge, Firefox or Safari.</p>'
+      : '';
     return `
-      <div class="two-col">
-        <section class="online">
-          <h3>ROOMS <button class="mini" id="refresh">REFRESH</button> <button class="mini" id="disconnect">DISCONNECT</button></h3>
-          <table class="rooms">
-            <tr><th>ROOM</th><th>MODE</th><th>MAP</th><th>PLAYERS</th><th>BOTS</th><th></th></tr>
-            ${this.rooms.length ? this.rooms.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc((MODE_LIST.find((m) => m.id === r.mode) || {}).name || r.mode)}</td><td>${esc(r.map)}</td><td>${r.players}/${r.max || 16}</td><td>${r.bots}</td>
-              <td><button class="mini join" data-room="${esc(r.id)}">JOIN</button></td></tr>`).join('') : '<tr><td colspan="6" class="empty">No rooms yet — create one.</td></tr>'}
-          </table>
-          <p class="status" id="online-status">${esc(this.status || '')}</p>
-        </section>
+      <div class="two-col ${this.busy ? 'busy' : ''}">
+        <div>
+          <h3>HOST A MATCH</h3>
+          ${unsupported}
+          <div class="host-row">
+            <button class="start" id="host-match">HOST MATCH</button>
+            <p class="note">You get a ${CODE_LENGTH}-character room code to send to friends. Up to ${MAX_ONLINE_PLAYERS} players; bots fill the teams.
+            The match runs in your browser, so keep your tab open — when you leave, the match ends for everyone.</p>
+          </div>
+          ${this.renderMatchSetup('h', this.hostValues())}
+        </div>
         <aside>
-          <h3>CREATE ROOM</h3>
-          <label>ROOM NAME <input id="room-name" maxlength="24" value="${esc(settings.name)}'s room"></label>
-          ${this.renderMatchSetup('c', createValues)}
-          <button class="start" id="create-room">CREATE &amp; JOIN</button>
+          <h3>JOIN A MATCH</h3>
+          <div class="join-row">
+            <input id="join-code" maxlength="${CODE_LENGTH}" placeholder="CODE" autocomplete="off" spellcheck="false" value="${esc(this.joinCode)}">
+            <button class="start small" id="join-match">JOIN</button>
+          </div>
+          <p class="status" id="online-status">${esc(this.status)}</p>
+          ${this.renderLoadout()}
+          <p class="note">Everyone needs the same VANGUARD.html and an internet connection. Players connect directly to the host's browser;
+          a free public matchmaking service is used only to find the host by code.</p>
         </aside>
       </div>`;
   }
 
   bindOnline() {
     const root = this.root;
-    const connect = root.querySelector('#connect');
-    if (connect) {
-      connect.addEventListener('click', async () => {
-        this.click();
-        const url = root.querySelector('#server-url').value.trim();
-        saveSettings({ serverUrl: url });
-        this.setStatus('Connecting…');
-        const transport = new WsTransport(url);
-        try {
-          const lobby = await transport.connect(settings.name);
-          this.transport = transport;
-          this.rooms = lobby.rooms || [];
-          this.status = 'Connected to ' + url;
-          transport.onClose = () => { this.transport = null; this.status = 'Disconnected from server.'; if (this.root.style.display !== 'none') this.render(); };
-          transport.setHandler((msg) => this.onLobbyMessage(msg));
-          this.render();
-        } catch (err) {
-          this.setStatus(err.message || String(err));
-        }
-      });
-      return;
-    }
-    root.querySelector('#refresh').addEventListener('click', () => { this.click(); this.requestRooms(); });
-    root.querySelector('#disconnect').addEventListener('click', () => { this.click(); this.transport.close(); this.transport = null; this.status = ''; this.render(); });
-    root.querySelectorAll('[data-room]').forEach((b) => b.addEventListener('click', () => {
+    root.querySelectorAll('[data-hmode]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ hostMode: b.dataset.hmode }); this.render(); }));
+    root.querySelectorAll('[data-hmap]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ hostMap: b.dataset.hmap }); this.render(); }));
+    root.querySelectorAll('[data-hdiff]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ hostDifficulty: b.dataset.hdiff }); this.render(); }));
+    const bots = root.querySelector('#hbots');
+    bots.addEventListener('input', () => { bots.nextElementSibling.textContent = bots.value; saveSettings({ hostBots: parseInt(bots.value, 10) }); });
+    this.bindLoadout();
+
+    const codeInput = root.querySelector('#join-code');
+    codeInput.addEventListener('input', () => {
+      const clean = normalizeCode(codeInput.value);
+      if (clean !== codeInput.value) codeInput.value = clean;
+      this.joinCode = clean;
+    });
+    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') root.querySelector('#join-match').click(); });
+
+    root.querySelector('#host-match').addEventListener('click', async () => {
+      if (this.busy) return;
       this.click();
-      this.setStatus('Joining…');
-      this.transport.send({ type: 'joinRoom', id: b.dataset.room, name: settings.name, loadout: [settings.primary, 'pistol'] });
-    }));
-    const cv = this.createValues;
-    root.querySelectorAll('[data-cmode]').forEach((b) => b.addEventListener('click', () => { this.click(); cv.mode = b.dataset.cmode; this.render(); }));
-    root.querySelectorAll('[data-cmap]').forEach((b) => b.addEventListener('click', () => { this.click(); cv.map = b.dataset.cmap; this.render(); }));
-    root.querySelectorAll('[data-cdiff]').forEach((b) => b.addEventListener('click', () => { this.click(); cv.difficulty = b.dataset.cdiff; this.render(); }));
-    const bots = root.querySelector('#cbots');
-    bots.addEventListener('input', () => { bots.nextElementSibling.textContent = bots.value; cv.bots = parseInt(bots.value, 10); });
-    root.querySelector('#create-room').addEventListener('click', () => {
+      const v = this.hostValues();
+      this.setBusy(true, 'Creating match…');
+      try {
+        await this.onHost({ mode: v.mode, map: v.map, bots: v.mode === 'horde' ? Math.min(v.bots, 5) : v.bots, difficulty: v.difficulty });
+      } catch (err) {
+        this.setBusy(false, err.message || String(err));
+      }
+    });
+    root.querySelector('#join-match').addEventListener('click', async () => {
+      if (this.busy) return;
       this.click();
-      this.setStatus('Creating room…');
-      this.transport.send({
-        type: 'createRoom', name: root.querySelector('#room-name').value, mode: cv.mode, map: cv.map, bots: cv.bots, difficulty: cv.difficulty,
-        playerName: settings.name, loadout: [settings.primary, 'pistol'],
-      });
+      const code = normalizeCode(codeInput.value);
+      if (code.length !== CODE_LENGTH) { this.setStatus(`Enter the ${CODE_LENGTH}-character room code from the host.`); return; }
+      this.joinCode = code;
+      this.setBusy(true, `Joining ${code}…`);
+      try {
+        await this.onJoin(code);
+      } catch (err) {
+        this.setBusy(false, err.message || String(err));
+      }
     });
   }
 
-  requestRooms() {
-    if (this.transport) this.transport.send({ type: 'listRooms' });
-  }
-
-  onLobbyMessage(msg) {
-    if (msg.type === 'lobby' || msg.type === 'rooms') {
-      this.rooms = msg.rooms || [];
-      if (this.tab === 'online' && this.root.style.display !== 'none') this.render();
-    } else if (msg.type === 'error') {
-      this.setStatus(msg.message);
-    } else if (msg.type === 'welcome') {
-      this.status = '';
-      this.onStartOnline(this.transport, msg);
-    }
+  setBusy(busy, status) {
+    this.busy = busy;
+    this.status = status;
+    if (this.root.style.display !== 'none') this.render();
   }
 
   setStatus(text) {

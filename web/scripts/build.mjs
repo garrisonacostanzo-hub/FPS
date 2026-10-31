@@ -1,5 +1,5 @@
-// Bundles the client (three.js + game code) into ONE self-contained file: dist/index.html.
-// The file works offline by simply opening it (file://), and is also served by the online server.
+// Bundles the client (three.js + peerjs + game code) into ONE self-contained file: dist/VANGUARD.html.
+// The file works by simply opening it (file://): offline play, and online play hosted by a player's browser.
 import { build } from 'esbuild';
 import { mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -24,6 +24,6 @@ const js = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 const css = readFileSync(join(root, 'src/client/styles.css'), 'utf8');
 const template = readFileSync(join(root, 'src/client/index.html'), 'utf8');
 const html = template.replace('/*__CSS__*/', () => css).replace('/*__JS__*/', () => js);
-const out = join(dist, 'index.html');
+const out = join(dist, 'VANGUARD.html');
 writeFileSync(out, html);
 console.log(`built ${out} (${(statSync(out).size / 1024).toFixed(0)} KB)`);

@@ -13,7 +13,6 @@ const DEFAULTS = {
   showFps: false,
   quality: 'high',
   primary: 'rifle',
-  serverUrl: '',
   toggleCrouch: false,
   toggleAim: false,
   // Offline match setup.
@@ -21,6 +20,11 @@ const DEFAULTS = {
   map: 'outpost',
   bots: 9,
   difficulty: 'normal',
+  // Online host setup.
+  hostMode: 'tdm',
+  hostMap: 'outpost',
+  hostBots: 6,
+  hostDifficulty: 'normal',
 };
 
 export const settings = load();

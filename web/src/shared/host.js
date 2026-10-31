@@ -1,5 +1,5 @@
 // Transport-agnostic game host: binds connected clients to entities, runs the fixed-rate simulation,
-// and emits snapshots/events. Used by the Node.js server (WebSocket) and by offline play (in-memory).
+// and emits snapshots/events. Runs in the browser: offline (in-memory) or as an online host (WebRTC peers).
 import { PROTOCOL_VERSION, TICK_DT } from './constants.js';
 import { Game } from './game.js';
 
