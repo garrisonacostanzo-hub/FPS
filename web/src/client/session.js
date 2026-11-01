@@ -13,8 +13,11 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { GameRenderer } from './renderer.js';
 import { onSettingsChanged, saveSettings, settings } from './settings.js';
+import { TouchControls, enterMobileFullscreen, touchControlsWanted } from './touch.js';
 
 const CMD_DT = 1 / 60;
+const TOUCH_LOOK = 0.0058;          // radians per CSS pixel of finger drag at sensitivity 1
+const ASSIST_CONE = 4.5 * Math.PI / 180;
 
 export class ClientSession {
   constructor({ transport, welcome, canvas, hudRoot, audio, onExit }) {
@@ -27,7 +30,7 @@ export class ClientSession {
     this.teams = this.modeInfo.teams;
     this.config = welcome.cfg;
     this.offline = transport.offline;
-    this.isHost = !!transport.isHost;
+    this.isHost = !this.offline && !!transport.isHost;
     this.roomCode = transport.code || '';
     this.interpDelay = this.offline ? 0.07 : 0.1;
     this.lastSnapT = -Infinity;
@@ -53,6 +56,19 @@ export class ClientSession {
       onChat: (text) => this.transport.send({ type: 'chat', text }),
       onLoadout: (primary) => this.transport.send({ type: 'loadout', primary }),
     });
+    this.touchUI = new TouchControls(hudRoot, this.input, {
+      onPause: () => { if (!this.paused) this.input.releaseLock(); },
+      onScoreboard: () => {},
+    });
+    this.touchUI.setEnabled(touchControlsWanted());
+    // "Auto" touch mode follows the last thing the player used: a finger or a mouse.
+    this._pointerKind = (e) => {
+      if (settings.touchControls !== 'auto') return;
+      if (e.pointerType === 'touch') this.touchUI.setEnabled(true);
+      else if (e.pointerType === 'mouse') this.touchUI.setEnabled(false);
+    };
+    window.addEventListener('pointerdown', this._pointerKind, true);
+    this.crosshairTarget = false;
 
     this.actor = createActor(0, 0, 0, 0, [settings.primary, 'pistol']);
     this.actor.id = this.myId;
@@ -99,7 +115,7 @@ export class ClientSession {
     this.applyRoster(welcome.roster);
     this.transport.setHandler((msg) => this.onMessage(msg));
     this.hud.showPause(true);
-    this.hud.el.pause.querySelector('h2').textContent = 'CLICK RESUME TO DEPLOY';
+    this.hud.el.pause.querySelector('h2').textContent = this.touchUI.enabled ? 'TAP RESUME TO DEPLOY' : 'CLICK RESUME TO DEPLOY';
     this.lastFrame = performance.now();
     this.frameHandle = requestAnimationFrame((t) => this.frame(t));
   }
@@ -125,7 +141,7 @@ export class ClientSession {
         this.hud.hideEnd();
         this.snapYaw = true;
         if (!this.input.locked) {
-          this.hud.el.pause.querySelector('h2').textContent = 'NEXT MATCH — CLICK RESUME';
+          this.hud.el.pause.querySelector('h2').textContent = 'NEXT MATCH — PRESS RESUME';
           this.hud.showPause(true);
         }
         return undefined;
@@ -297,6 +313,7 @@ export class ClientSession {
   // ==============================================================================================
   onLockChange(locked) {
     this.paused = !locked;
+    if (!locked) this.touchUI.releaseAll();
     if (locked) {
       this.hud.showPause(false);
       this.audio.ensure();
@@ -308,6 +325,7 @@ export class ClientSession {
 
   resume() {
     this.audio.ensure();
+    if (this.touchUI.enabled) enterMobileFullscreen();
     this.input.requestLock();
   }
 
@@ -324,6 +342,8 @@ export class ClientSession {
     if (!this.running) return;
     this.running = false;
     cancelAnimationFrame(this.frameHandle);
+    window.removeEventListener('pointerdown', this._pointerKind, true);
+    this.touchUI.dispose();
     this.input.dispose();
     this.unsubscribeSettings();
     this.hud.destroy();
@@ -345,7 +365,10 @@ export class ClientSession {
     this.transport.update(dt);
     if (!this.running) return;
 
+    this.crosshairTarget = this.touchUI.enabled && !this.paused && this.actor.alive && (settings.aimAssist || settings.autoFire)
+      ? this.findCrosshairTarget() : 0;
     this.updateLook(dt);
+    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && settings.autoFire });
     if (!this.paused && this.input.consume('chat')) {
       this.input.releaseLock();
       this.hud.openChat();
@@ -402,7 +425,15 @@ export class ClientSession {
     this.viewYaw -= look.x * k;
     this.viewPitch += look.y * k * (settings.invertY ? 1 : -1);
     this.viewPitch = clamp(this.viewPitch, -1.5, 1.5);
-    this.lookDX = look.x; this.lookDY = look.y;
+    // Touch look: finger drag, slowed while the crosshair is on an enemy (aim assist).
+    const touch = this.input.consumeTouchLook();
+    if (touch.x || touch.y) {
+      const assist = settings.aimAssist && this.crosshairTarget ? 0.45 : 1;
+      const kt = TOUCH_LOOK * settings.touchSensitivity * zoom * assist;
+      this.viewYaw -= touch.x * kt;
+      this.viewPitch = clamp(this.viewPitch + touch.y * kt * (settings.invertY ? 1 : -1), -1.5, 1.5);
+    }
+    this.lookDX = look.x + touch.x * 2; this.lookDY = look.y + touch.y * 2;
     // Recoverable recoil returns smoothly.
     const recover = Math.min(1, dt * 9);
     this.recoilPitch -= this.recoilPitch * recover;
@@ -420,6 +451,13 @@ export class ClientSession {
       if (slot >= 0 && slot < n) sw = slot;
       else if (cycle !== 0 && n > 1) sw = (this.actor.ws.active + cycle + n) % n;
     }
+    // Touch auto-fire: shoot while an enemy is in the crosshair (semi-auto guns get a pulsed trigger).
+    if (active && this.touchUI.enabled && settings.autoFire && this.crosshairTarget === 2) {
+      const w = activeWeapon(this.actor.ws);
+      input.touch.autoFire = w.mode === 'auto' || Math.floor(this.seq / 4) % 2 === 0;
+    } else {
+      input.touch.autoFire = false;
+    }
     return {
       s: ++this.seq,
       dt: CMD_DT,
@@ -432,6 +470,45 @@ export class ClientSession {
       r: active ? input.consume('reload') : false,
       vt: this.estimatedServerTime() - this.interpDelay,
     };
+  }
+
+  /**
+   * What is under the crosshair: 0 nothing, 1 an enemy close to it (aim assist), 2 an enemy directly in it
+   * and in range with a clear line of sight (auto-fire).
+   */
+  findCrosshairTarget() {
+    const m = this.actor.motor;
+    const yaw = this.viewYaw + this.recoilYaw;
+    const pitch = clamp(this.viewPitch + this.recoilPitch, -1.5, 1.5);
+    const dir = dirFromAngles(yaw, pitch);
+    const ox = m.x, oy = m.y + eyeHeightOf(m), oz = m.z;
+    const w = activeWeapon(this.actor.ws);
+    const range = Math.min(w.range, 120);
+    const hb = this.tmpHitbox || (this.tmpHitbox = {});
+    let result = 0;
+    for (const [id, pose] of this.renderPoses) {
+      if (!pose.alive || id === this.myId) continue;
+      const r = this.roster.get(id);
+      if (this.teams && r && r.team === this.myTeam) continue;
+      hitboxesAt(pose.x, pose.y, pose.z, pose.crouch, hb);
+      const cx = (hb.minx + hb.maxx) / 2 - ox, cy = (hb.miny + hb.maxy) / 2 - oy, cz = (hb.minz + hb.maxz) / 2 - oz;
+      const dist = Math.hypot(cx, cy, cz);
+      if (dist > range || dist < 0.5) continue;
+      const cos = (cx * dir.x + cy * dir.y + cz * dir.z) / dist;
+      const cone = ASSIST_CONE + Math.atan(0.6 / dist); // wider for close targets
+      if (cos < Math.cos(cone)) continue;
+      // Direct hit test along the crosshair, then line of sight to the target.
+      let t = raySphere(ox, oy, oz, dir.x, dir.y, dir.z, hb.hx, hb.hy, hb.hz, hb.hr);
+      const tb = rayBox(ox, oy, oz, dir.x, dir.y, dir.z, hb.minx, hb.miny, hb.minz, hb.maxx, hb.maxy, hb.maxz, range, null);
+      if (tb >= 0 && (t < 0 || tb < t)) t = tb;
+      const probe = t >= 0 ? t : dist;
+      const pdx = t >= 0 ? dir.x : cx / dist, pdy = t >= 0 ? dir.y : cy / dist, pdz = t >= 0 ? dir.z : cz / dist;
+      const wall = this.world.raycast(ox, oy, oz, pdx, pdy, pdz, probe);
+      if (wall && wall.t < probe - 0.05) continue;
+      if (t >= 0) return 2;
+      result = 1;
+    }
+    return result;
   }
 
   estimatedServerTime() {

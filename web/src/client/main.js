@@ -74,4 +74,7 @@ const closeOnline = () => { if (session && !session.offline) session.transport.c
 window.addEventListener('beforeunload', closeOnline);
 window.addEventListener('pagehide', closeOnline);
 
+// iOS Safari: stop pinch-zoom gestures from scaling the game.
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+
 window.__vanguardBooted = true;

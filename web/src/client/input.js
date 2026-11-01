@@ -17,17 +17,19 @@ export class Input {
     this.enabled = true;
     this.locked = false;
     this.fallback = false; // playing without pointer lock
+    this.touchMode = false; // on-screen touch controls drive the game (see touch.js)
+    this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, crouch: false, scoreboard: false, lookX: 0, lookY: 0 };
     this.onLockChange = null;
 
     this._keydown = (e) => this.handleKey(e, true);
     this._keyup = (e) => this.handleKey(e, false);
     this._mousemove = (e) => {
-      if (!this.locked) return;
+      if (!this.locked || this.touchMode) return;
       this.lookX += e.movementX || 0;
       this.lookY += e.movementY || 0;
     };
     this._mousedown = (e) => {
-      if (!this.locked) return;
+      if (!this.locked || this.touchMode) return;
       if (this.fallback && e.target === this.canvas) this.tryLock(false);
       this.mouseButtons |= 1 << e.button;
       if (e.button === 0) this.latched.firePressed = true;
@@ -35,7 +37,7 @@ export class Input {
     };
     this._mouseup = (e) => { this.mouseButtons &= ~(1 << e.button); };
     this._wheel = (e) => {
-      if (!this.locked) return;
+      if (!this.locked || this.touchMode) return;
       this.latched.cycle = e.deltaY > 0 ? 1 : -1;
     };
     this._contextmenu = (e) => e.preventDefault();
@@ -77,7 +79,17 @@ export class Input {
   /** Starts playing: pointer lock if the browser allows it, otherwise free-cursor fallback. */
   requestLock() {
     if (this.locked) return;
+    if (this.touchMode) { this.enterFallback(); return; } // touch play never needs the mouse captured
     this.tryLock(true);
+  }
+
+  /** Switches between touch controls and keyboard/mouse without pausing the game. */
+  setTouchMode(on) {
+    this.touchMode = on;
+    if (on && this.locked && !this.fallback && document.pointerLockElement) {
+      this.fallback = true; // keep playing; the pointerlockchange handler ignores the release
+      document.exitPointerLock();
+    }
   }
 
   tryLock(fallbackOnFailure) {
@@ -147,17 +159,24 @@ export class Input {
     return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0);
   }
 
-  get moveX() { return this.axis('KeyA', 'KeyD') || this.axis('ArrowLeft', 'ArrowRight'); }
-  get moveZ() { return this.axis('KeyS', 'KeyW') || this.axis('ArrowDown', 'ArrowUp'); }
-  get sprint() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
-  get crouch() { return settings.toggleCrouch ? this.crouchToggled : (this.keys.has('ControlLeft') || this.keys.has('KeyC')); }
-  get fire() { return (this.mouseButtons & 1) !== 0; }
-  get aim() { return settings.toggleAim ? this.aimToggled : (this.mouseButtons & 4) !== 0; }
-  get scoreboard() { return this.keys.has('Tab'); }
+  get moveX() { return this.axis('KeyA', 'KeyD') || this.axis('ArrowLeft', 'ArrowRight') || this.touch.mx; }
+  get moveZ() { return this.axis('KeyS', 'KeyW') || this.axis('ArrowDown', 'ArrowUp') || this.touch.mz; }
+  get sprint() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.touch.sprint; }
+  get crouch() { return this.touch.crouch || (settings.toggleCrouch ? this.crouchToggled : (this.keys.has('ControlLeft') || this.keys.has('KeyC'))); }
+  get fire() { return (this.mouseButtons & 1) !== 0 || this.touch.fire > 0 || this.touch.autoFire; }
+  get aim() { return this.touch.aim || (settings.toggleAim ? this.aimToggled : (this.mouseButtons & 4) !== 0); }
+  get scoreboard() { return this.keys.has('Tab') || this.touch.scoreboard; }
 
   consumeLook() {
     const x = this.lookX, y = this.lookY;
     this.lookX = 0; this.lookY = 0;
+    return { x, y };
+  }
+
+  /** Finger drag since the last call, in CSS pixels. */
+  consumeTouchLook() {
+    const x = this.touch.lookX, y = this.touch.lookY;
+    this.touch.lookX = 0; this.touch.lookY = 0;
     return { x, y };
   }
 
@@ -184,5 +203,7 @@ export class Input {
   resetToggles() {
     this.crouchToggled = false;
     this.aimToggled = false;
+    this.touch.aim = false;
+    this.touch.crouch = false;
   }
 }

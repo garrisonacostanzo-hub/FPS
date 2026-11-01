@@ -11,10 +11,15 @@ const DEFAULTS = {
   crosshairColor: '#ffffff',
   crosshairSize: 1,
   showFps: false,
-  quality: 'high',
+  quality: coarsePointer() ? 'medium' : 'high', // phones/tablets default to a lighter renderer
   primary: 'rifle',
   toggleCrouch: false,
   toggleAim: false,
+  // Touch controls (phones/tablets).
+  touchControls: 'auto', // 'auto' | 'on' | 'off'
+  touchSensitivity: 1.0,
+  aimAssist: true,
+  autoFire: true,
   // Offline match setup.
   mode: 'tdm',
   map: 'outpost',
@@ -26,6 +31,10 @@ const DEFAULTS = {
   hostBots: 6,
   hostDifficulty: 'normal',
 };
+
+function coarsePointer() {
+  try { return window.matchMedia('(pointer: coarse)').matches && navigator.maxTouchPoints > 0; } catch { return false; }
+}
 
 export const settings = load();
 

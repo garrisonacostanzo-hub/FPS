@@ -115,6 +115,24 @@ function createPeer(id) {
   return new Peer(id, signalingOptions());
 }
 
+/** True when this page runs inside another page (e.g. an app's preview/viewer frame). */
+export function isEmbedded() {
+  try { return window.self !== window.top; } catch { return true; }
+}
+
+const POLICY_BLOCKED = 'This page is open inside a viewer that blocks online connections (for example Claude\'s artifact viewer). '
+  + 'Offline play works here; for online play, download VANGUARD.html and open it in your web browser.';
+
+/** Calls fail(message) if the page's security policy blocks the connection to the matchmaking service. */
+function watchPolicy(fail) {
+  const onViolation = (e) => {
+    const directive = String(e.effectiveDirective || e.violatedDirective || '');
+    if (/connect-src|default-src/.test(directive)) fail(POLICY_BLOCKED);
+  };
+  document.addEventListener('securitypolicyviolation', onViolation);
+  return () => document.removeEventListener('securitypolicyviolation', onViolation);
+}
+
 function peerErrorMessage(err) {
   switch (err && err.type) {
     case 'browser-incompatible': return 'This browser does not support peer-to-peer connections (WebRTC).';
@@ -217,15 +235,26 @@ export class HostTransport {
         const code = randomCode();
         let settled = false;
         let peer;
+        const unwatch = watchPolicy((message) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          unwatch();
+          if (peer) peer.destroy();
+          reject(new Error(message));
+        });
         try {
           peer = createPeer(ID_PREFIX + code);
         } catch (err) {
+          settled = true;
+          unwatch();
           reject(new Error(peerErrorMessage(err)));
           return;
         }
         const timer = setTimeout(() => {
           if (settled) return;
           settled = true;
+          unwatch();
           peer.destroy();
           reject(new Error('The matchmaking service did not answer. Check your internet connection and try again.'));
         }, 15000);
@@ -233,6 +262,7 @@ export class HostTransport {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          unwatch();
           this.peer = peer;
           this.code = code;
           this.bindPeer(peer);
@@ -242,6 +272,7 @@ export class HostTransport {
           if (settled) return; // later errors (network blips, unknown peers) are handled by 'disconnected'/connections
           settled = true;
           clearTimeout(timer);
+          unwatch();
           peer.destroy();
           if (err.type === 'unavailable-id' && attempts < 4) attempt();
           else reject(new Error(peerErrorMessage(err)));
@@ -424,9 +455,11 @@ export class JoinTransport {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        unwatch();
         this.shutdown();
         reject(new Error(message));
       };
+      const unwatch = watchPolicy(fail);
       const timer = setTimeout(() => fail(this.conn && !this.conn.open
         ? 'Found the match but could not connect to the host. A firewall or strict network may be blocking peer-to-peer connections.'
         : 'Could not reach the matchmaking service. Check your internet connection and try again.'), 20000);
@@ -461,6 +494,7 @@ export class JoinTransport {
             if (msg.type === 'welcome') {
               settled = true;
               clearTimeout(timer);
+              unwatch();
               this.startWatchdog();
               resolve(msg);
             } else if (msg.type === 'error') {

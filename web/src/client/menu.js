@@ -3,7 +3,7 @@ import { DIFFICULTY, GAME_TITLE, MAX_ONLINE_PLAYERS } from '../shared/constants.
 import { MAP_LIST } from '../shared/map.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { PRIMARY_WEAPONS, WEAPONS } from '../shared/weapons.js';
-import { CODE_LENGTH, normalizeCode, webrtcSupported } from './net.js';
+import { CODE_LENGTH, isEmbedded, normalizeCode, webrtcSupported } from './net.js';
 import { saveSettings, settings } from './settings.js';
 
 /** True if this browser can create a WebGL 2 context (required by the renderer). */
@@ -162,9 +162,11 @@ export class MainMenu {
   renderOnline() {
     const unsupported = !webrtcSupported()
       ? '<p class="note warn">This browser (or the page embedding this game) blocks peer-to-peer connections, so online play is unavailable here. Open VANGUARD.html directly in Chrome, Edge, Firefox or Safari.</p>'
-      : '';
+      : isEmbedded()
+        ? '<p class="note warn">This game is running inside another page or app viewer, which may block online play. If hosting or joining fails, download VANGUARD.html and open it directly in your browser.</p>'
+        : '';
     return `
-      <div class="two-col ${this.busy ? 'busy' : ''}">
+      <div class="two-col online-cols ${this.busy ? 'busy' : ''}">
         <div>
           <h3>HOST A MATCH</h3>
           ${unsupported}
@@ -260,6 +262,11 @@ export class MainMenu {
         ${check('invertY', 'Invert mouse Y')}
         ${check('toggleCrouch', 'Toggle crouch')}
         ${check('toggleAim', 'Toggle aim down sights')}
+        <h3>TOUCH (PHONES &amp; TABLETS)</h3>
+        <label>ON-SCREEN CONTROLS <select data-k="touchControls">${[['auto', 'Auto (when you touch the screen)'], ['on', 'Always on'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${settings.touchControls === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        ${range('touchSensitivity', 'TOUCH LOOK SPEED', 0.3, 3, 0.05)}
+        ${check('aimAssist', 'Aim assist: slower look while the crosshair is on an enemy')}
+        ${check('autoFire', 'Auto-fire: shoot automatically when the crosshair is on an enemy')}
       </section>`;
   }
 
@@ -289,6 +296,16 @@ const CONTROLS_HTML = `
       <tr><td>Scoreboard</td><td>Tab (hold)</td></tr>
       <tr><td>Chat</td><td>T or Enter</td></tr>
       <tr><td>Pause / settings</td><td>Esc</td></tr>
+    </table>
+    <h3>TOUCH SCREEN</h3>
+    <table>
+      <tr><td>Move / sprint</td><td>Drag on the left half of the screen (push far forward to sprint)</td></tr>
+      <tr><td>Look</td><td>Drag on the right half of the screen</td></tr>
+      <tr><td>Fire</td><td>FIRE button (drag it to aim while shooting) or the left FIRE button</td></tr>
+      <tr><td>Aim / crouch</td><td>AIM and CROUCH buttons (tap to toggle)</td></tr>
+      <tr><td>Jump / reload</td><td>JUMP and RELOAD buttons</td></tr>
+      <tr><td>Switch weapon</td><td>⇄ button next to the ammo counter</td></tr>
+      <tr><td>Scoreboard / pause</td><td>☰ and II buttons (top right)</td></tr>
     </table>
     <p class="note">Tips: sprinting blocks firing; crouching and aiming tighten your spread; bots hear footsteps and gunfire,
     flank in squads and retreat to cover when suppressed. Hold zones in Domination, upgrade your gun in Gun Game, and survive escalating waves in Horde.</p>

@@ -219,3 +219,115 @@ label.check { flex-direction: row !important; align-items: center; gap: 10px !im
 @keyframes boot-help-in { to { opacity: 1; } }
 .banner { background: rgba(255,74,61,0.12); border: 1px solid rgba(255,74,61,0.5); color: #ffd0cc; border-radius: 12px; padding: 12px 16px; line-height: 1.5; font-size: 14px; }
 .banner b { color: #fff; }
+
+/* ---------------------------------------------------------------- touch controls (phones / tablets) */
+html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+#touch {
+  position: absolute; inset: 0; display: none; pointer-events: auto; touch-action: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  --u: 1; --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px); --sb: env(safe-area-inset-bottom, 0px); --st: env(safe-area-inset-top, 0px);
+}
+#hud.touch #touch { display: block; }
+.tbtn {
+  position: absolute; width: calc(var(--u) * 60px); height: calc(var(--u) * 60px); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(12, 16, 22, 0.42); border: 2px solid rgba(255, 255, 255, 0.35); color: rgba(255, 255, 255, 0.92);
+  font-weight: 800; font-size: calc(var(--u) * 11px); letter-spacing: 1px; text-shadow: 0 1px 2px #000;
+}
+.tbtn.down { background: rgba(255, 255, 255, 0.3); transform: scale(0.94); }
+.tbtn.on { background: rgba(255, 176, 46, 0.42); border-color: var(--accent); }
+.tbtn.big {
+  width: calc(var(--u) * 90px); height: calc(var(--u) * 90px); font-size: calc(var(--u) * 15px);
+  right: calc(var(--u) * 28px + var(--sr)); bottom: calc(var(--u) * 56px + var(--sb));
+  background: rgba(255, 74, 61, 0.34); border-color: rgba(255, 130, 120, 0.85);
+}
+.tbtn.big.auto { box-shadow: 0 0 0 5px rgba(255, 74, 61, 0.45); }
+.tbtn.fire2 {
+  width: calc(var(--u) * 56px); height: calc(var(--u) * 56px); left: calc(var(--u) * 24px + var(--sl)); bottom: calc(var(--u) * 180px + var(--sb));
+  background: rgba(255, 74, 61, 0.26); border-color: rgba(255, 130, 120, 0.6);
+}
+.tbtn[data-b=aim] { right: calc(var(--u) * 136px + var(--sr)); bottom: calc(var(--u) * 30px + var(--sb)); }
+.tbtn[data-b=crouch] { right: calc(var(--u) * 146px + var(--sr)); bottom: calc(var(--u) * 110px + var(--sb)); font-size: calc(var(--u) * 9px); }
+.tbtn[data-b=jump] { right: calc(var(--u) * 78px + var(--sr)); bottom: calc(var(--u) * 166px + var(--sb)); }
+.tbtn.small { width: calc(var(--u) * 50px); height: calc(var(--u) * 50px); font-size: calc(var(--u) * 9px); right: calc(var(--u) * 16px + var(--sr)); bottom: calc(var(--u) * 168px + var(--sb)); }
+.tbtn.swap {
+  left: 50%; bottom: calc(8px + var(--sb)); transform: translateX(4px); width: 130px; height: 52px; border-radius: 12px;
+  background: transparent; border: 1px dashed rgba(255, 255, 255, 0.22); align-items: flex-start; justify-content: flex-end; padding: 2px 7px; font-size: 15px;
+}
+.tbtn.swap.down { background: rgba(255, 255, 255, 0.12); transform: translateX(4px) scale(0.97); }
+.tbtn.top { width: 44px; height: 44px; top: calc(8px + var(--st)); font-size: 15px; border-radius: 12px; }
+.tbtn.pause { right: calc(10px + var(--sr)); }
+.tbtn.score { right: calc(60px + var(--sr)); }
+.stick {
+  position: absolute; width: calc(var(--u) * 116px); height: calc(var(--u) * 116px);
+  margin-left: calc(var(--u) * -58px); margin-top: calc(var(--u) * -58px); border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.32); background: rgba(0, 0, 0, 0.18); pointer-events: none;
+}
+.stick.idle { left: calc(var(--u) * 118px + var(--sl)); bottom: calc(var(--u) * 36px + var(--sb)); margin-top: 0; opacity: 0.45; }
+.stick .knob {
+  position: absolute; left: 50%; top: 50%; width: calc(var(--u) * 50px); height: calc(var(--u) * 50px);
+  margin: calc(var(--u) * -25px) 0 0 calc(var(--u) * -25px); border-radius: 50%; background: rgba(255, 255, 255, 0.55);
+}
+.stick span { position: absolute; left: 50%; bottom: calc(var(--u) * -22px); transform: translateX(-50%); font-size: 10px; font-weight: 800; letter-spacing: 2px; color: var(--accent); opacity: 0; }
+.stick.sprint { border-color: var(--accent); }
+.stick.sprint .knob { background: var(--accent); }
+.stick.sprint span { opacity: 1; }
+.rotate-hint { display: none; position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%); width: 80%; text-align: center; background: var(--panel); padding: 12px 16px; border-radius: 12px; font-size: 14px; pointer-events: none; }
+#touch.portrait .rotate-hint { display: block; }
+
+/* Compact HUD while touch controls are active. */
+#hud.touch #minimap { width: 112px; height: 112px; top: calc(8px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); }
+#hud.touch #area { top: calc(124px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); width: 112px; font-size: 9px; }
+#hud.touch #netstats { top: calc(140px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); right: auto; font-size: 9px; }
+#hud.touch #status { top: 4px; min-width: 0; transform: translateX(-50%) scale(0.78); transform-origin: top center; }
+#hud.touch #killfeed { top: 62px; right: calc(10px + env(safe-area-inset-right, 0px)); transform: scale(0.85); transform-origin: top right; }
+#hud.touch #vitals { left: auto; right: 50%; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); min-width: 0; width: 130px; padding: 5px 10px 8px; transform: translateX(-4px); }
+#hud.touch #vitals .label { display: none; }
+#hud.touch #hp-value { font-size: 20px; }
+#hud.touch #ammo { right: auto; left: 50%; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); min-width: 0; width: 130px; height: 52px; padding: 5px 10px 6px; transform: translateX(4px); text-align: left; }
+#hud.touch #weapon-name { font-size: 9px; letter-spacing: 1px; white-space: nowrap; overflow: hidden; }
+#hud.touch #ammo-mag { font-size: 22px; }
+#hud.touch #ammo .sep { font-size: 14px; margin: 0 4px; }
+#hud.touch #ammo-reserve { font-size: 13px; }
+#hud.touch #weapon-slots { display: none; }
+#hud.touch #chat-log { left: calc(8px + env(safe-area-inset-left, 0px)); top: 160px; bottom: auto; max-width: 220px; font-size: 10px; }
+#hud.touch #announce { font-size: 22px; }
+#hud.touch #streak { font-size: 15px; }
+
+/* Small screens (phones in landscape, small tablets). */
+@media (max-width: 900px), (max-height: 560px) {
+  .menu-shell { padding: 12px 16px; gap: 10px; }
+  .menu-shell header { gap: 12px; }
+  .logo { font-size: 26px; letter-spacing: 5px; }
+  .logo span { font-size: 9px; letter-spacing: 4px; }
+  .tab { padding: 8px 10px; font-size: 11px; letter-spacing: 1px; }
+  nav { flex-wrap: wrap; }
+  h3 { margin: 12px 0 8px; }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .card { min-height: 0; padding: 10px 10px 12px; }
+  .card small { font-size: 11px; padding-right: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card i { display: none; }
+  .card b { font-size: 14px; margin-bottom: 4px; }
+  .row3 { grid-template-columns: 1fr; gap: 12px; }
+  #start-offline { position: fixed; right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 5; min-width: 200px; margin: 0; }
+  .menu-shell { padding-bottom: 80px; }
+  .two-col.online-cols aside { order: -1; }
+  .weapons { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .weapon { padding: 7px 10px; }
+  .host-row { flex-direction: column; align-items: stretch; }
+  .host-row .start { min-width: 0; }
+  .start { padding: 12px; font-size: 16px; }
+  footer { display: none; }
+  .controls table { min-width: 0; }
+  #pause .panel { padding: 14px 16px; gap: 8px; width: min(520px, 96vw); max-height: calc(100% - 16px); overflow-y: auto; }
+  #pause h2 { font-size: 18px; }
+  #pause label { grid-template-columns: 1fr 120px 34px; font-size: 12px; }
+  #pause .room-code b { font-size: 20px; }
+  #scoreboard, #endscreen { gap: 10px; padding: 10px; overflow-y: auto; }
+  .board-team { min-width: 0; width: min(420px, 47vw); padding: 8px 10px; }
+  .board-team.wide { min-width: 0; width: min(560px, 94vw); }
+  .board-team table { font-size: 11px; }
+  .board-team td { padding: 3px 4px; }
+  #endscreen h1 { font-size: 28px; }
+  #death-text { font-size: 20px; }
+}

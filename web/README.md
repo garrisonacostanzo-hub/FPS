@@ -5,6 +5,7 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Offline single-player against bots.**
 * **Online multiplayer.** One player hosts in their browser and friends join with a 5-character room code. Humans and bots play in the same match.
 * **Six game modes on three maps.** Every mode works both offline and online.
+* **Computer or phone.** Keyboard and mouse on a computer; on-screen touch controls on phones and tablets.
 
 ## Play offline
 
@@ -31,6 +32,39 @@ Some rules:
 * Players connect directly to the host's browser over WebRTC. The free public [PeerJS](https://peerjs.com) service is used only to find the host from the room code. If a strict network blocks a direct connection, PeerJS's public relay is tried automatically.
 * Online play doesn't work inside sandboxed embeds that block WebRTC (such as Claude's artifact viewer). Open the file directly in a browser.
 * Advanced: to use your own PeerJS signaling server, open `VANGUARD.html?signal=your-host:9000`. Everyone in a match must use the same server.
+
+## Play on a phone or tablet
+
+The same file has touch controls. They turn on automatically when you touch the screen.
+
+**Opening the file on a phone:**
+* **Android:** download `VANGUARD.html`, then open it in **Chrome**: Chrome menu (⋮) → *Downloads* → tap the file. If a file manager asks which app to use, pick Chrome; a plain "HTML viewer" will not run the game. Online play works.
+* **iPhone / iPad:** iOS only *previews* downloaded HTML files (the game's code does not run in a preview, so you get the "Still seeing this screen?" message). Open it from a **web link** instead:
+  * A shared Claude artifact link runs the game for **offline play against bots**. Online play is blocked inside that viewer.
+  * To play **online** on iPhone, put `VANGUARD.html` on any static web host and open its `https://` link in Safari. GitHub Pages and Netlify Drop (drag the file onto the page) both work.
+
+**Tips:**
+* Turn the phone sideways (landscape). On Android, tapping **DEPLOY** or **RESUME** also switches to fullscreen.
+* Phones start on the **medium** graphics preset. If it stutters, choose **low** under Settings → Graphics quality.
+
+**Touch controls:**
+
+| Action | Touch |
+|---|---|
+| Move | Drag anywhere on the left part of the screen (a joystick appears under your thumb) |
+| Sprint | Push the joystick far forward, past its ring |
+| Look | Drag anywhere on the right part of the screen |
+| Fire | Big **FIRE** button (keep your thumb on it and drag to aim while shooting), or the small **FIRE** button on the left |
+| Aim down sights / crouch | **AIM** / **CROUCH** (tap to toggle) |
+| Jump / reload | **JUMP** / **RELOAD** |
+| Switch weapon | Tap the weapon and ammo panel (⇄) |
+| Scoreboard / pause | **☰** / **II** at the top right |
+
+**Aiming help** (on by default; turn it off under Settings → Touch):
+* **Aim assist** slows the look speed while the crosshair is on an enemy.
+* **Auto-fire** shoots while an enemy is in your crosshair, in range and in clear view.
+
+You can also set the touch look speed, or force the touch controls always on or off.
 
 ## Build from source
 
@@ -79,7 +113,7 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 
 If the browser or an embedding frame refuses mouse capture (pointer lock), the game switches to free-cursor mouse look. Clicking in-game tries to capture the mouse again.
 
-**Settings** covers name, sensitivity, ADS sensitivity, FOV, invert Y, volume, crosshair color and size, graphics quality, and the hold/toggle choices. Settings are saved in `localStorage`.
+**Settings** covers name, sensitivity, ADS sensitivity, FOV, invert Y, volume, crosshair color and size, graphics quality, the hold/toggle choices, and the touch options (on-screen controls, touch look speed, aim assist, auto-fire). Settings are saved in `localStorage`.
 
 ## Weapons
 
@@ -142,7 +176,8 @@ web/
       ├─ net.js             # LocalTransport (offline), HostTransport & JoinTransport (WebRTC via PeerJS)
       ├─ renderer.js        # Three.js scene, characters, view model, effects
       ├─ hud.js             # HUD, killfeed, scoreboard, minimap, menus
-      ├─ input.js           # pointer lock, keyboard/mouse
+      ├─ input.js           # pointer lock, keyboard/mouse (+ touch state)
+      ├─ touch.js           # on-screen touch controls: move stick, look, fire/aim/jump/crouch/reload/swap
       ├─ audio.js           # procedural WebAudio (positional gunfire, footsteps…)
       ├─ settings.js        # persisted settings
       ├─ index.html         # page template

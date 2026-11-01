@@ -4,6 +4,7 @@ import { TEAM, TEAM_COLORS, TEAM_NAMES } from '../shared/constants.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { saveSettings, settings } from './settings.js';
+import { isTouchDevice } from './touch.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -310,6 +311,7 @@ export class Hud {
     el.innerHTML = `
       <div class="panel">
         <h2>PAUSED</h2>
+        <div class="row"><button data-act="resume" class="primary">RESUME</button><button data-act="leave" class="danger">${this.isHost ? 'END MATCH FOR ALL' : 'LEAVE MATCH'}</button></div>
         ${this.online ? `
         <div class="room-code">
           <span>ROOM CODE</span><b>${this.roomCode}</b><button data-act="copy">COPY</button>
@@ -318,6 +320,10 @@ export class Hud {
           ? 'You are hosting: friends open VANGUARD.html, choose PLAY ONLINE and enter this code. Keep this tab open — the match runs in your browser.'
           : 'Online match — the game keeps running while paused.'}</p>`
           : '<p class="sub">Offline match — the game keeps running.</p>'}
+        ${isTouchDevice() || settings.touchControls === 'on' ? `
+        <label>Touch look speed <input type="range" min="0.3" max="3" step="0.05" data-k="touchSensitivity" value="${settings.touchSensitivity}"><output></output></label>
+        <label class="check"><input type="checkbox" data-k="aimAssist" ${settings.aimAssist ? 'checked' : ''}> Aim assist (slower look on targets)</label>
+        <label class="check"><input type="checkbox" data-k="autoFire" ${settings.autoFire ? 'checked' : ''}> Auto-fire when the crosshair is on an enemy</label>` : ''}
         <label>Mouse sensitivity <input type="range" min="0.1" max="4" step="0.05" data-k="sensitivity" value="${settings.sensitivity}"><output></output></label>
         <label>Aim sensitivity <input type="range" min="0.2" max="1.5" step="0.05" data-k="adsSensitivity" value="${settings.adsSensitivity}"><output></output></label>
         <label>Field of view <input type="range" min="60" max="110" step="1" data-k="fov" value="${settings.fov}"><output></output></label>
@@ -328,7 +334,6 @@ export class Hud {
         <label class="check"><input type="checkbox" data-k="invertY" ${settings.invertY ? 'checked' : ''}> Invert mouse Y</label>
         <label class="check"><input type="checkbox" data-k="toggleCrouch" ${settings.toggleCrouch ? 'checked' : ''}> Toggle crouch</label>
         <label class="check"><input type="checkbox" data-k="toggleAim" ${settings.toggleAim ? 'checked' : ''}> Toggle aim</label>
-        <div class="row"><button data-act="resume" class="primary">RESUME</button><button data-act="leave" class="danger">${this.isHost ? 'END MATCH FOR ALL' : 'LEAVE MATCH'}</button></div>
       </div>`;
     el.querySelectorAll('input, select').forEach((input) => {
       const out = input.parentElement.querySelector('output');
