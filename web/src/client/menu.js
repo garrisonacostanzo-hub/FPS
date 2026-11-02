@@ -5,6 +5,7 @@ import { MODE_LIST } from '../shared/modes.js';
 import { PRIMARY_WEAPONS, WEAPONS } from '../shared/weapons.js';
 import { CODE_LENGTH, isEmbedded, normalizeCode, webrtcSupported } from './net.js';
 import { saveSettings, settings } from './settings.js';
+import { bindSettingsControls, renderSettingsSections, resetAllSettings } from './settingsui.js';
 
 /** True if this browser can create a WebGL 2 context (required by the renderer). */
 export function detectWebGL2() {
@@ -248,36 +249,20 @@ export class MainMenu {
 
   // ------------------------------------------------------------------------------------------------
   renderSettings() {
-    const range = (k, label, min, max, step) => `<label>${label} <input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${settings[k]}"><output>${settings[k]}</output></label>`;
-    const check = (k, label) => `<label class="check"><input type="checkbox" data-k="${k}" ${settings[k] ? 'checked' : ''}> ${label}</label>`;
     return `
-      <section class="settings">
-        ${range('sensitivity', 'MOUSE SENSITIVITY', 0.1, 4, 0.05)}
-        ${range('adsSensitivity', 'AIM SENSITIVITY', 0.2, 1.5, 0.05)}
-        ${range('fov', 'FIELD OF VIEW', 60, 110, 1)}
-        ${range('volume', 'VOLUME', 0, 1, 0.05)}
-        ${range('crosshairSize', 'CROSSHAIR SIZE', 0.6, 1.8, 0.1)}
-        <label>CROSSHAIR COLOUR <input type="color" data-k="crosshairColor" value="${settings.crosshairColor}"></label>
-        <label>GRAPHICS QUALITY <select data-k="quality">${['low', 'medium', 'high'].map((q) => `<option ${settings.quality === q ? 'selected' : ''}>${q}</option>`).join('')}</select></label>
-        ${check('invertY', 'Invert mouse Y')}
-        ${check('toggleCrouch', 'Toggle crouch')}
-        ${check('toggleAim', 'Toggle aim down sights')}
-        <h3>TOUCH (PHONES &amp; TABLETS)</h3>
-        <label>ON-SCREEN CONTROLS <select data-k="touchControls">${[['auto', 'Auto (when you touch the screen)'], ['on', 'Always on'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${settings.touchControls === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        ${range('touchSensitivity', 'TOUCH LOOK SPEED', 0.3, 3, 0.05)}
-        ${check('aimAssist', 'Aim assist: slower look while the crosshair is on an enemy')}
-        ${check('autoFire', 'Auto-fire: shoot automatically when the crosshair is on an enemy')}
-      </section>`;
+      <div class="settings-page">
+        <div class="set-cards">${renderSettingsSections()}</div>
+        <div class="set-actions"><button class="mini" id="reset-settings">RESET TO DEFAULTS</button>
+          <span class="note">Settings are saved in this browser. Your callsign, loadout and match setup are kept on reset.</span></div>
+      </div>`;
   }
 
   bindSettings() {
-    this.root.querySelectorAll('[data-k]').forEach((input) => {
-      input.addEventListener('input', () => {
-        const value = input.type === 'checkbox' ? input.checked : input.type === 'range' ? parseFloat(input.value) : input.value;
-        saveSettings({ [input.dataset.k]: value });
-        const out = input.parentElement.querySelector('output');
-        if (out) out.textContent = input.value;
-      });
+    bindSettingsControls(this.root);
+    this.root.querySelector('#reset-settings').addEventListener('click', () => {
+      this.click();
+      resetAllSettings();
+      this.render();
     });
   }
 }
@@ -302,7 +287,8 @@ const CONTROLS_HTML = `
       <tr><td>Move / sprint</td><td>Drag on the left half of the screen (push far forward to sprint)</td></tr>
       <tr><td>Look</td><td>Drag on the right half of the screen</td></tr>
       <tr><td>Fire</td><td>FIRE button (drag it to aim while shooting) or the left FIRE button</td></tr>
-      <tr><td>Aim / crouch</td><td>AIM and CROUCH buttons (tap to toggle)</td></tr>
+      <tr><td>Aim</td><td>Hold AIM to aim down sights; drag your thumb on it to look around while aiming (can be set to tap-to-toggle)</td></tr>
+      <tr><td>Crouch</td><td>CROUCH button (tap to toggle)</td></tr>
       <tr><td>Jump / reload</td><td>JUMP and RELOAD buttons</td></tr>
       <tr><td>Switch weapon</td><td>⇄ button next to the ammo counter</td></tr>
       <tr><td>Scoreboard / pause</td><td>☰ and II buttons (top right)</td></tr>

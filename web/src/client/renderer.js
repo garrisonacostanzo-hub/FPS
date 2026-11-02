@@ -298,7 +298,7 @@ export class GameRenderer {
     this.canvas = canvas;
     this.quality = settings.quality;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality !== 'low', powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : 1));
+    this.applyPixelRatio(false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -328,6 +328,16 @@ export class GameRenderer {
     this.resize();
     this._resize = () => this.resize();
     window.addEventListener('resize', this._resize);
+  }
+
+  /** Pixel ratio from the quality preset, scaled by the Resolution setting. */
+  applyPixelRatio(resize = true) {
+    const base = Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : 1);
+    const ratio = base * Math.max(0.5, Math.min(1, settings.renderScale || 1));
+    if (ratio === this.pixelRatio) return;
+    this.pixelRatio = ratio;
+    this.renderer.setPixelRatio(ratio);
+    if (resize) this.resize();
   }
 
   resize() {

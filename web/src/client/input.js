@@ -18,7 +18,7 @@ export class Input {
     this.locked = false;
     this.fallback = false; // playing without pointer lock
     this.touchMode = false; // on-screen touch controls drive the game (see touch.js)
-    this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, crouch: false, scoreboard: false, lookX: 0, lookY: 0 };
+    this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, aimHold: 0, crouch: false, scoreboard: false, lookX: 0, lookY: 0 };
     this.onLockChange = null;
 
     this._keydown = (e) => this.handleKey(e, true);
@@ -164,7 +164,7 @@ export class Input {
   get sprint() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.touch.sprint; }
   get crouch() { return this.touch.crouch || (settings.toggleCrouch ? this.crouchToggled : (this.keys.has('ControlLeft') || this.keys.has('KeyC'))); }
   get fire() { return (this.mouseButtons & 1) !== 0 || this.touch.fire > 0 || this.touch.autoFire; }
-  get aim() { return this.touch.aim || (settings.toggleAim ? this.aimToggled : (this.mouseButtons & 4) !== 0); }
+  get aim() { return this.touch.aim || this.touch.aimHold > 0 || (settings.toggleAim ? this.aimToggled : (this.mouseButtons & 4) !== 0); }
   get scoreboard() { return this.keys.has('Tab') || this.touch.scoreboard; }
 
   consumeLook() {

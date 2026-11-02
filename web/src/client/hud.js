@@ -4,7 +4,7 @@ import { TEAM, TEAM_COLORS, TEAM_NAMES } from '../shared/constants.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { saveSettings, settings } from './settings.js';
-import { isTouchDevice } from './touch.js';
+import { bindSettingsControls, renderSettingsSections, touchSettingsRelevant } from './settingsui.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -48,7 +48,7 @@ export class Hud {
       }
       e.stopPropagation();
     });
-    this.applyCrosshairStyle();
+    this.applySettings();
   }
 
   destroy() {
@@ -100,7 +100,10 @@ export class Hud {
   }
 
   applyCrosshairStyle(weapon) {
-    const style = weapon ? (weapon.id === 'shotgun' ? 'circle' : weapon.id === 'sniper' ? 'dot' : weapon.id === 'smg' ? 'dotcross' : 'cross') : 'cross';
+    if (weapon) this.crosshairWeapon = weapon;
+    const w = this.crosshairWeapon;
+    const perWeapon = w ? (w.id === 'shotgun' ? 'circle' : w.id === 'sniper' ? 'dot' : w.id === 'smg' ? 'dotcross' : 'cross') : 'cross';
+    const style = settings.crosshairStyle && settings.crosshairStyle !== 'auto' ? settings.crosshairStyle : perWeapon;
     this.el.cross.dataset.style = style;
     this.el.cross.style.setProperty('--xh-color', settings.crosshairColor);
     this.el.cross.style.setProperty('--xh-scale', settings.crosshairSize);
@@ -320,33 +323,13 @@ export class Hud {
           ? 'You are hosting: friends open VANGUARD.html, choose PLAY ONLINE and enter this code. Keep this tab open — the match runs in your browser.'
           : 'Online match — the game keeps running while paused.'}</p>`
           : '<p class="sub">Offline match — the game keeps running.</p>'}
-        ${isTouchDevice() || settings.touchControls === 'on' ? `
-        <label>Touch look speed <input type="range" min="0.3" max="3" step="0.05" data-k="touchSensitivity" value="${settings.touchSensitivity}"><output></output></label>
-        <label class="check"><input type="checkbox" data-k="aimAssist" ${settings.aimAssist ? 'checked' : ''}> Aim assist (slower look on targets)</label>
-        <label class="check"><input type="checkbox" data-k="autoFire" ${settings.autoFire ? 'checked' : ''}> Auto-fire when the crosshair is on an enemy</label>` : ''}
-        <label>Mouse sensitivity <input type="range" min="0.1" max="4" step="0.05" data-k="sensitivity" value="${settings.sensitivity}"><output></output></label>
-        <label>Aim sensitivity <input type="range" min="0.2" max="1.5" step="0.05" data-k="adsSensitivity" value="${settings.adsSensitivity}"><output></output></label>
-        <label>Field of view <input type="range" min="60" max="110" step="1" data-k="fov" value="${settings.fov}"><output></output></label>
-        <label>Volume <input type="range" min="0" max="1" step="0.05" data-k="volume" value="${settings.volume}"><output></output></label>
-        <label>Crosshair colour <input type="color" data-k="crosshairColor" value="${settings.crosshairColor}"></label>
-        <label>Crosshair size <input type="range" min="0.6" max="1.8" step="0.1" data-k="crosshairSize" value="${settings.crosshairSize}"><output></output></label>
-        <label>Primary weapon (next respawn) <select data-k="primary">${primaryOptions}</select></label>
-        <label class="check"><input type="checkbox" data-k="invertY" ${settings.invertY ? 'checked' : ''}> Invert mouse Y</label>
-        <label class="check"><input type="checkbox" data-k="toggleCrouch" ${settings.toggleCrouch ? 'checked' : ''}> Toggle crouch</label>
-        <label class="check"><input type="checkbox" data-k="toggleAim" ${settings.toggleAim ? 'checked' : ''}> Toggle aim</label>
+        <label class="set"><span>Primary weapon (next respawn)</span><select data-k="primary" data-type="select">${primaryOptions}</select></label>
+        ${renderSettingsSections({ inGame: true, open: [touchSettingsRelevant() ? 'touch' : 'mouse'] })}
       </div>`;
-    el.querySelectorAll('input, select').forEach((input) => {
-      const out = input.parentElement.querySelector('output');
-      const show = () => { if (out) out.textContent = input.value; };
-      show();
-      input.addEventListener('input', () => {
-        const k = input.dataset.k;
-        const value = input.type === 'checkbox' ? input.checked : input.type === 'range' ? parseFloat(input.value) : input.value;
-        saveSettings({ [k]: value });
-        show();
-        if (k.startsWith('crosshair')) this.applyCrosshairStyle();
-        if (k === 'primary' && this.callbacks.onLoadout) this.callbacks.onLoadout(value);
-      });
+    bindSettingsControls(el, (k, value) => {
+      if (k.startsWith('crosshair')) this.applyCrosshairStyle();
+      if (k === 'showMinimap' || k === 'showFps') this.applySettings();
+      if (k === 'primary' && this.callbacks.onLoadout) this.callbacks.onLoadout(value);
     });
     el.querySelector('[data-act="resume"]').addEventListener('click', () => this.callbacks.onResume && this.callbacks.onResume());
     el.querySelector('[data-act="leave"]').addEventListener('click', () => this.callbacks.onLeave && this.callbacks.onLeave());
@@ -375,6 +358,14 @@ export class Hud {
 
   setNetStats(text) {
     this.el.stats.textContent = text;
+  }
+
+  /** Shows or hides optional HUD parts according to the settings. */
+  applySettings() {
+    this.el.minimap.style.display = settings.showMinimap ? '' : 'none';
+    this.el.area.style.display = settings.showMinimap ? '' : 'none';
+    this.el.stats.style.display = settings.showFps ? '' : 'none';
+    this.applyCrosshairStyle();
   }
 
   // ------------------------------------------------------------------------------------------------

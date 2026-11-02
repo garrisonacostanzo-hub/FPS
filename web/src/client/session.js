@@ -110,7 +110,12 @@ export class ClientSession {
     this.running = true;
     this.paused = true;
     this.tmpV = new THREE.Vector3();
-    this.unsubscribeSettings = onSettingsChanged(() => { this.renderer.camera.fov = settings.fov; });
+    this.unsubscribeSettings = onSettingsChanged(() => {
+      this.renderer.camera.fov = settings.fov;
+      this.renderer.applyPixelRatio();
+      if (this.touchUI) this.touchUI.refresh();
+      if (this.hud) this.hud.applySettings();
+    });
 
     this.applyRoster(welcome.roster);
     this.transport.setHandler((msg) => this.onMessage(msg));
@@ -252,13 +257,15 @@ export class ClientSession {
       case 'hit':
         this.hud.hitmarker(ev.hs === 1, ev.k === 1);
         if (ev.k) this.audio.kill(); else this.audio.hit(ev.hs === 1);
+        this.vibrate(ev.k ? 45 : 12);
         return;
       case 'dmg': {
         const m = this.actor.motor;
         const toSource = Math.atan2(-(ev.f[0] - m.x), -(ev.f[2] - m.z));
         this.hud.damageIndicator(this.viewYaw - toSource);
         this.audio.hurt();
-        this.shake = Math.min(1.2, this.shake + ev.d / 40);
+        this.vibrate(35);
+        if (settings.cameraBob) this.shake = Math.min(1.2, this.shake + ev.d / 40);
         return;
       }
       case 'kill': {
@@ -270,6 +277,7 @@ export class ClientSession {
       case 'died': {
         const killer = this.roster.get(ev.by);
         this.hud.showDeath(killer && ev.by !== this.myId ? killer.name : '', ev.w, ev.ra);
+        this.vibrate([70, 50, 70]);
         this.deathCam = 0;
         this.deathFocus = ev.by;
         return;
@@ -365,10 +373,10 @@ export class ClientSession {
     this.transport.update(dt);
     if (!this.running) return;
 
-    this.crosshairTarget = this.touchUI.enabled && !this.paused && this.actor.alive && (settings.aimAssist || settings.autoFire)
+    this.crosshairTarget = this.touchUI.enabled && !this.paused && this.actor.alive && (settings.aimAssist || settings.autoFire !== 'off')
       ? this.findCrosshairTarget() : 0;
     this.updateLook(dt);
-    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && settings.autoFire });
+    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed() });
     if (!this.paused && this.input.consume('chat')) {
       this.input.releaseLock();
       this.hud.openChat();
@@ -429,7 +437,8 @@ export class ClientSession {
     const touch = this.input.consumeTouchLook();
     if (touch.x || touch.y) {
       const assist = settings.aimAssist && this.crosshairTarget ? 0.45 : 1;
-      const kt = TOUCH_LOOK * settings.touchSensitivity * zoom * assist;
+      const touchZoom = aim > 0.01 ? lerp(1, (w.adsFov / settings.fov) * settings.touchAdsSensitivity / 0.8, aim) : 1;
+      const kt = TOUCH_LOOK * settings.touchSensitivity * touchZoom * assist;
       this.viewYaw -= touch.x * kt;
       this.viewPitch = clamp(this.viewPitch + touch.y * kt * (settings.invertY ? 1 : -1), -1.5, 1.5);
     }
@@ -452,7 +461,7 @@ export class ClientSession {
       else if (cycle !== 0 && n > 1) sw = (this.actor.ws.active + cycle + n) % n;
     }
     // Touch auto-fire: shoot while an enemy is in the crosshair (semi-auto guns get a pulsed trigger).
-    if (active && this.touchUI.enabled && settings.autoFire && this.crosshairTarget === 2) {
+    if (active && this.touchUI.enabled && this.crosshairTarget === 2 && this.autoFireAllowed()) {
       const w = activeWeapon(this.actor.ws);
       input.touch.autoFire = w.mode === 'auto' || Math.floor(this.seq / 4) % 2 === 0;
     } else {
@@ -470,6 +479,20 @@ export class ClientSession {
       r: active ? input.consume('reload') : false,
       vt: this.estimatedServerTime() - this.interpDelay,
     };
+  }
+
+  /** Auto-fire setting: 'off', 'hip' (never while aiming down sights) or 'always'. */
+  autoFireAllowed() {
+    const mode = settings.autoFire;
+    if (mode === 'always') return true;
+    if (mode === 'hip') return !this.input.aim;
+    return false;
+  }
+
+  /** Short vibration on phones that support it (Android), if enabled. */
+  vibrate(pattern) {
+    if (!this.touchUI.enabled || !settings.vibration || !navigator.vibrate) return;
+    try { navigator.vibrate(pattern); } catch { /* ignore */ }
   }
 
   /**
@@ -635,7 +658,7 @@ export class ClientSession {
     cam.rotation.order = 'YXZ';
 
     if (this.actor.alive) {
-      const bob = m.grounded ? Math.sin(t * 0.012 * (1 + speed * 0.15)) * Math.min(1, speed / 7) * 0.03 * (1 - this.actor.aim01 * 0.85) : 0;
+      const bob = m.grounded && settings.cameraBob ? Math.sin(t * 0.012 * (1 + speed * 0.15)) * Math.min(1, speed / 7) * 0.03 * (1 - this.actor.aim01 * 0.85) : 0;
       cam.position.set(px, py + eyeHeightOf(m) + Math.abs(bob), pz);
       cam.rotation.set(clamp(this.viewPitch + this.recoilPitch, -1.5, 1.5) + shakeY, this.viewYaw + this.recoilYaw + shakeX, 0);
     } else {
@@ -689,7 +712,7 @@ export class ClientSession {
         if (ally || now - (this.lastFireSeen.get(id) || -1e9) < 1500) others.push({ x: pose.x, z: pose.z, ally });
       }
     }
-    this.hud.drawMinimap({ x: m.x, z: m.z, yaw: this.viewYaw }, others, this.modeState && this.modeState.z ? this.modeState.z : [], this.myTeam, this.modeId === 'dom');
+    if (settings.showMinimap) this.hud.drawMinimap({ x: m.x, z: m.z, yaw: this.viewYaw }, others, this.modeState && this.modeState.z ? this.modeState.z : [], this.myTeam, this.modeId === 'dom');
   }
 }
 

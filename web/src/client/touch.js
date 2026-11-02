@@ -1,6 +1,6 @@
 // On-screen controls for phones and tablets. They feed the same Input object as the keyboard and mouse:
 //  - left half:  floating move stick (push it past the ring, forward, to sprint) + a second fire button
-//  - right half: drag anywhere to look; FIRE (also drags to look), AIM, JUMP, CROUCH, RELOAD
+//  - right half: drag anywhere to look; FIRE and AIM (hold, and drag either one to look), JUMP, CROUCH, RELOAD
 //  - weapon panel: tap to switch weapons; top-right: scoreboard and pause
 import { settings } from './settings.js';
 
@@ -81,6 +81,15 @@ export class TouchControls {
     el.addEventListener('contextmenu', this._block);
     window.addEventListener('resize', this._resize);
     window.addEventListener('orientationchange', this._resize);
+    this.refresh();
+  }
+
+  /** Applies the touch settings (size, opacity, left fire button, aim mode). Called when settings change. */
+  refresh() {
+    this.el.style.setProperty('--o', String(settings.buttonOpacity));
+    this.el.classList.toggle('no-fire2', !settings.showLeftFire);
+    const t = this.input.touch;
+    if (settings.aimButton === 'hold') t.aim = false; else t.aimHold = 0;
     this.layout();
   }
 
@@ -101,7 +110,7 @@ export class TouchControls {
 
   layout() {
     const vmin = Math.min(window.innerWidth, window.innerHeight);
-    const u = Math.max(0.75, Math.min(1.4, vmin / 400));
+    const u = Math.max(0.75, Math.min(1.4, vmin / 400)) * (settings.buttonScale || 1);
     this.scale = u;
     this.el.style.setProperty('--u', u.toFixed(3));
     this.el.classList.toggle('portrait', window.innerHeight > window.innerWidth * 1.05);
@@ -110,7 +119,7 @@ export class TouchControls {
   /** Called every frame: reflects toggle states on the buttons. */
   update(state) {
     const t = this.input.touch;
-    this.btn.aim.classList.toggle('on', t.aim);
+    this.btn.aim.classList.toggle('on', t.aim || t.aimHold > 0);
     this.btn.crouch.classList.toggle('on', t.crouch);
     this.btn.score.classList.toggle('on', t.scoreboard);
     this.btn.fire.classList.toggle('auto', !!state.autoFiring);
@@ -127,7 +136,10 @@ export class TouchControls {
     switch (id) {
       case 'fire': role = 'fire'; t.fire++; break;           // fire + drag to look
       case 'fire2': role = 'fire2'; t.fire++; break;         // fire only
-      case 'aim': t.aim = !t.aim; break;
+      case 'aim':
+        // Hold mode: aim while the finger is down, and dragging it turns the view. Never fires.
+        if (settings.aimButton === 'toggle') { t.aim = !t.aim; role = 'look'; } else { t.aimHold++; role = 'aim'; }
+        break;
       case 'jump': this.input.latched.jump = true; role = 'look'; break; // keep looking after a jump tap
       case 'crouch': t.crouch = !t.crouch; break;
       case 'reload': this.input.latched.reload = true; break;
@@ -138,11 +150,18 @@ export class TouchControls {
         if (e.clientX < window.innerWidth * 0.42 && this.stickId === null) {
           role = 'stick';
           this.stickId = e.pointerId;
-          this.stickX = e.clientX;
-          this.stickY = e.clientY;
+          if (settings.stickMode === 'fixed') {
+            // Fixed stick: stays in its corner; the thumb's offset from its centre is the input.
+            const r = this.stick.getBoundingClientRect();
+            this.stickX = r.left + r.width / 2;
+            this.stickY = r.top + r.height / 2;
+          } else {
+            this.stickX = e.clientX;
+            this.stickY = e.clientY;
+          }
           this.stick.classList.remove('idle');
-          this.stick.style.left = e.clientX + 'px';
-          this.stick.style.top = e.clientY + 'px';
+          this.stick.style.left = this.stickX + 'px';
+          this.stick.style.top = this.stickY + 'px';
           this.stick.style.bottom = 'auto';
           this.setStick(0, 0, false);
         } else {
@@ -152,6 +171,7 @@ export class TouchControls {
     if (target) target.classList.add('down');
     this.pointers.set(e.pointerId, { role, x: e.clientX, y: e.clientY, button: target });
     try { this.el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (role === 'stick' && settings.stickMode === 'fixed') this.onMove(e); // thumb may land off-centre
   }
 
   onMove(e) {
@@ -162,7 +182,7 @@ export class TouchControls {
     const dy = e.clientY - p.y;
     p.x = e.clientX;
     p.y = e.clientY;
-    if (p.role === 'look' || p.role === 'fire') {
+    if (p.role === 'look' || p.role === 'fire' || p.role === 'aim') {
       this.input.touch.lookX += dx * LOOK_FACTOR;
       this.input.touch.lookY += dy * LOOK_FACTOR;
     } else if (p.role === 'stick') {
@@ -171,7 +191,7 @@ export class TouchControls {
       const oy = e.clientY - this.stickY;
       const dist = Math.hypot(ox, oy);
       const forward = dist > 0 ? -oy / dist : 0;
-      const sprint = dist > r * SPRINT_PULL && forward > 0.8;
+      const sprint = forward > 0.8 && (settings.autoSprint ? dist >= r * 0.95 : dist > r * SPRINT_PULL);
       const k = Math.min(1, dist / r);
       const nx = dist > 0 ? (ox / dist) * k : 0;
       const ny = dist > 0 ? (oy / dist) * k : 0;
@@ -185,6 +205,7 @@ export class TouchControls {
     this.pointers.delete(e.pointerId);
     if (p.button) p.button.classList.remove('down');
     if (p.role === 'fire' || p.role === 'fire2') this.input.touch.fire = Math.max(0, this.input.touch.fire - 1);
+    if (p.role === 'aim') this.input.touch.aimHold = Math.max(0, this.input.touch.aimHold - 1);
     if (p.role === 'stick') {
       this.stickId = null;
       this.setStick(0, 0, false);
@@ -209,7 +230,7 @@ export class TouchControls {
   releaseAll() {
     for (const id of [...this.pointers.keys()]) this.onUp({ pointerId: id });
     const t = this.input.touch;
-    t.fire = 0; t.mx = 0; t.mz = 0; t.sprint = false; t.lookX = 0; t.lookY = 0;
+    t.fire = 0; t.aimHold = 0; t.mx = 0; t.mz = 0; t.sprint = false; t.lookX = 0; t.lookY = 0;
     if (t.scoreboard) { t.scoreboard = false; this.callbacks.onScoreboard(false); }
   }
 }

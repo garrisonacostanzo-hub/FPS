@@ -55,16 +55,29 @@ The same file has touch controls. They turn on automatically when you touch the 
 | Sprint | Push the joystick far forward, past its ring |
 | Look | Drag anywhere on the right part of the screen |
 | Fire | Big **FIRE** button (keep your thumb on it and drag to aim while shooting), or the small **FIRE** button on the left |
-| Aim down sights / crouch | **AIM** / **CROUCH** (tap to toggle) |
+| Aim down sights | **Hold AIM**. Drag your thumb on it to look around while aiming. It never fires. (Settings can switch it to tap-to-toggle.) |
+| Crouch | **CROUCH** (tap to toggle) |
 | Jump / reload | **JUMP** / **RELOAD** |
 | Switch weapon | Tap the weapon and ammo panel (⇄) |
 | Scoreboard / pause | **☰** / **II** at the top right |
 
-**Aiming help** (on by default; turn it off under Settings → Touch):
-* **Aim assist** slows the look speed while the crosshair is on an enemy.
-* **Auto-fire** shoots while an enemy is in your crosshair, in range and in clear view.
+**Aiming help** (change it under Settings → Touch controls):
+* **Aim assist** (on by default) slows the look speed while the crosshair is on an enemy.
+* **Auto-fire** shoots while an enemy is in your crosshair, in range and in clear view. It has three settings:
+  * **Not while aiming** (default): it never fires while you hold AIM.
+  * **Always**.
+  * **Off**.
 
-You can also set the touch look speed, or force the touch controls always on or off.
+**Touch settings:**
+* On-screen controls: Auto, Always on or Off.
+* AIM button: Hold or Tap to toggle.
+* Auto-fire and aim assist.
+* Look speed, and a separate look speed while aiming.
+* Move stick: floating or fixed.
+* Sprint when the stick is pushed all the way forward.
+* Button size and opacity.
+* Show or hide the left FIRE button.
+* Vibration on hits and damage (Android).
 
 ## Build from source
 
@@ -113,7 +126,19 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 
 If the browser or an embedding frame refuses mouse capture (pointer lock), the game switches to free-cursor mouse look. Clicking in-game tries to capture the mouse again.
 
-**Settings** covers name, sensitivity, ADS sensitivity, FOV, invert Y, volume, crosshair color and size, graphics quality, the hold/toggle choices, and the touch options (on-screen controls, touch look speed, aim assist, auto-fire). Settings are saved in `localStorage`.
+**Settings** has four sections. The main menu's SETTINGS tab and the in-game pause menu show the same options:
+* **Touch controls:** listed above.
+* **Mouse & keyboard:**
+  * Sensitivity, and a separate sensitivity while aiming.
+  * Hold or toggle for aim and crouch.
+* **View & HUD:**
+  * Field of view and invert look.
+  * Camera bob and screen shake.
+  * Crosshair style (per weapon, cross, cross + dot, dot, circle), size and colour.
+  * Show or hide the minimap, and the FPS/ping counter.
+* **Graphics & audio:** quality preset, resolution scale and volume.
+
+Settings are saved in `localStorage`. **Reset to defaults** keeps your callsign, loadout and match setup.
 
 ## Weapons
 
@@ -180,6 +205,7 @@ web/
       ├─ touch.js           # on-screen touch controls: move stick, look, fire/aim/jump/crouch/reload/swap
       ├─ audio.js           # procedural WebAudio (positional gunfire, footsteps…)
       ├─ settings.js        # persisted settings
+      ├─ settingsui.js      # settings schema + controls shared by the menu and the pause screen
       ├─ index.html         # page template
       └─ styles.css
 ```
