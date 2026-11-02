@@ -33,6 +33,28 @@ export function rankForSr(sr) {
   return { tier, tierIndex, division, name: `${tier.name} ${['I', 'II', 'III'][division - 1]}`, step, floor: step * SR_PER_DIVISION, next: (step + 1) * SR_PER_DIVISION, color: tier.color };
 }
 
+// SHOWDOWN: the 1v1 ladder against friends. Its own Elo-style rating (starts at 1000) and its own titles, separate
+// from Ranked SR.
+export const SHOWDOWN_START = 1000;
+export const SHOWDOWN_TITLES = [
+  { id: 'rookie', name: 'Rookie', min: 0, color: '#9aa5b1' },
+  { id: 'contender', name: 'Contender', min: 900, color: '#7fd36b' },
+  { id: 'gunslinger', name: 'Gunslinger', min: 1100, color: '#ffb547' },
+  { id: 'duelist', name: 'Duelist', min: 1300, color: '#ff7a45' },
+  { id: 'marksman', name: 'Marksman', min: 1500, color: '#ff4f8b' },
+  { id: 'deadeye', name: 'Deadeye', min: 1700, color: '#b46bff' },
+  { id: 'champion', name: 'Showdown Champion', min: 1900, color: '#ffe066' },
+];
+
+/** Showdown title for a rating: { ...title, index, next (rating of the next title or null) }. */
+export function showdownTitle(rating) {
+  const r = Math.round(rating ?? SHOWDOWN_START);
+  let i = 0;
+  while (i + 1 < SHOWDOWN_TITLES.length && r >= SHOWDOWN_TITLES[i + 1].min) i++;
+  const t = SHOWDOWN_TITLES[i];
+  return { ...t, index: i, next: i + 1 < SHOWDOWN_TITLES.length ? SHOWDOWN_TITLES[i + 1].min : null };
+}
+
 /** Step index for "reach this rank" requirements: tierIndex*3 + (division-1), Legend = 18. */
 const step = (tierIndex, division) => (tierIndex >= 6 ? 18 : tierIndex * 3 + (division - 1));
 

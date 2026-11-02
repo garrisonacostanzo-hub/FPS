@@ -4,7 +4,7 @@ import { DIFFICULTY, GAME_TITLE, MAX_ONLINE_PLAYERS } from '../shared/constants.
 import { CAMOS, OUTFITS, RARITY, rankForSr } from '../shared/cosmetics.js';
 import { difficultyName } from '../shared/difficulty.js';
 import { MAP_LIST } from '../shared/map.js';
-import { MODE_LIST } from '../shared/modes.js';
+import { MODE_LIST, SQUAD_TEAM_SIZE } from '../shared/modes.js';
 import { PRIMARY_WEAPONS, WEAPONS } from '../shared/weapons.js';
 import { camoSwatch } from './gfx/textures.js';
 import { CODE_LENGTH, isEmbedded, normalizeCode, webrtcSupported } from './net.js';
@@ -14,8 +14,11 @@ import {
 } from './profile.js';
 import { saveSettings, settings } from './settings.js';
 import { bindSettingsControls, renderSettingsSections, resetAllSettings } from './settingsui.js';
+import { social } from './social.js';
 import { exportCode, importCode, storageStatus } from './storage.js';
+import { outfitArt } from './ui/art.js';
 import { levelBadge, rankEmblem } from './ui/emblems.js';
+import { friendsTab } from './ui/friendsTab.js';
 
 const camoName = (id) => (CAMOS.find((c) => c.id === id) || CAMOS[0]).name;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -34,14 +37,18 @@ export function detectWebGL2() {
   }
 }
 
-const TABS = [['play', 'PLAY'], ['ranked', 'RANKED'], ['online', 'ONLINE'], ['armory', 'ARMORY'], ['barracks', 'BARRACKS'], ['settings', 'SETTINGS']];
+const TABS = [['play', 'PLAY'], ['ranked', 'RANKED'], ['friends', 'FRIENDS'], ['online', 'ONLINE'], ['armory', 'ARMORY'], ['barracks', 'BARRACKS'], ['settings', 'SETTINGS']];
+// Playlists in the menu (the 1v1 duel mode is only reachable by challenging a friend).
+const PLAYLIST = MODE_LIST.filter((m) => !m.hidden);
 const MODE_ART = { tdm: '⚔', dom: '⚑', ffa: '✦', gungame: '⬆', elim: '☠', horde: '⛨' };
 
 export class MainMenu {
-  constructor(root, { onStartOffline, onStartRanked, onHost, onJoin, audio, showcase }) {
+  constructor(root, { onStartOffline, onStartRanked, onStartSquad, onJoinSquadMatch, onHost, onJoin, audio, showcase }) {
     this.root = root;
     this.onStartOffline = onStartOffline;
     this.onStartRanked = onStartRanked;
+    this.onStartSquad = onStartSquad;
+    this.onJoinSquadMatch = onJoinSquadMatch;
     this.onHost = onHost;
     this.onJoin = onJoin;
     this.audio = audio;
@@ -53,13 +60,49 @@ export class MainMenu {
     this.busy = false;
     this.joinCode = '';
     this.webgl = detectWebGL2();
+    this.friendSel = null;
+    this.squadSig = '';
     this.render();
+    social.on(() => this.onSocialChanged());
+  }
+
+  /** Squad / friends changed: refresh what depends on it without losing what the player is typing. */
+  onSocialChanged() {
+    if (this.rendering || this.root.style.display === 'none') return;
+    const sig = this.squadSignature();
+    const squadChanged = sig !== this.squadSig;
+    if (this.tab === 'friends' || (squadChanged && (this.tab === 'play' || this.tab === 'ranked'))) {
+      if (this.busy) return;
+      const active = document.activeElement;
+      const focusId = active && active.id && this.root.contains(active) ? active.id : null;
+      const caret = focusId && typeof active.selectionStart === 'number' ? active.selectionStart : null;
+      const scroll = this.root.scrollTop;
+      this.render();
+      this.root.scrollTop = scroll;
+      if (focusId) {
+        const el = this.root.querySelector('#' + focusId);
+        if (el) { el.focus(); if (caret !== null && el.setSelectionRange) el.setSelectionRange(caret, caret); }
+      }
+      return;
+    }
+    const bar = this.root.querySelector('.m-squad-wrap');
+    if (bar) { bar.innerHTML = this.renderSquadBar(); this.bindSquadBar(); }
+    this.squadSig = sig;
+    const badge = this.root.querySelector('[data-tab="friends"] .m-badge');
+    const n = social.attentionCount();
+    if (badge) { badge.textContent = String(n); badge.style.display = n ? '' : 'none'; }
+  }
+
+  squadSignature() {
+    const p = social.party;
+    return p ? `${p.id}|${p.leader}|${p.members.map((m) => m.c).join(',')}|${p.pl}|${p.room}` : 'solo';
   }
 
   // ------------------------------------------------------------------------------------------------
   show(tab, status) {
     if (tab === 'offline') tab = 'play';
     if (tab) this.tab = tab;
+    if (status) this.friendMsg = this.tab === 'friends' ? status : this.friendMsg;
     this.status = status || '';
     this.busy = false;
     this.root.style.display = 'flex';
@@ -85,12 +128,21 @@ export class MainMenu {
       if (this.armoryKind === 'camo') camo = this.armorySel;
       if (this.armoryKind === 'outfit') outfit = this.armorySel;
     }
+    // Viewing a friend shows their operator and camo.
+    const friend = this.tab === 'friends' && this.friendSel ? social.data.friends[this.friendSel] : null;
+    if (friend && friend.card) { camo = friend.card.eq.camo; outfit = friend.card.eq.outfit; }
     this.showcase.setLook({ camo, outfit, weapon: settings.primary });
     this.showcase.setFocus(this.tab === 'armory' && this.armoryKind === 'camo' ? 'weapon' : 'operator');
   }
 
   // ------------------------------------------------------------------------------------------------
   render() {
+    this.rendering = true;
+    // The squad leader's open playlist decides how big the squad may be (one team of that mode).
+    if (social.isLeader) {
+      if (this.tab === 'ranked') social.setPlaylist('ranked');
+      else if (this.tab === 'play' && SQUAD_TEAM_SIZE[settings.mode]) social.setPlaylist(settings.mode);
+    }
     const lp = levelProgress();
     const rank = rankForSr(profile.ranked.sr);
     this.root.innerHTML = `
@@ -98,7 +150,8 @@ export class MainMenu {
       <div class="m-shell">
         <header class="m-top">
           <div class="m-brand">${GAME_TITLE}<small>TACTICAL OPERATIONS</small></div>
-          <nav class="m-tabs">${TABS.map(([id, label]) => `<button class="m-tab ${this.tab === id ? 'on' : ''}" data-tab="${id}">${label}</button>`).join('')}</nav>
+          <nav class="m-tabs">${TABS.map(([id, label]) => `<button class="m-tab ${this.tab === id ? 'on' : ''}" data-tab="${id}">${label}${id === 'friends' ? `<em class="m-badge" style="${social.attentionCount() ? '' : 'display:none'}">${social.attentionCount()}</em>` : ''}</button>`).join('')}</nav>
+          <div class="m-squad-wrap">${this.renderSquadBar()}</div>
           <div class="m-card" data-tab="barracks" title="Your profile">
             ${levelBadge(lp.level, 44)}
             <div class="m-card-main">
@@ -121,8 +174,11 @@ export class MainMenu {
       this.armorySel = null;
       this.render();
     }));
-    const binders = { play: () => this.bindPlay(), ranked: () => this.bindRanked(), online: () => this.bindOnline(), armory: () => this.bindArmory(), barracks: () => this.bindBarracks(), settings: () => this.bindSettings() };
+    const binders = { play: () => this.bindPlay(), ranked: () => this.bindRanked(), friends: () => this.bindFriends(), online: () => this.bindOnline(), armory: () => this.bindArmory(), barracks: () => this.bindBarracks(), settings: () => this.bindSettings() };
     if (binders[this.tab]) binders[this.tab]();
+    this.bindSquadBar();
+    this.squadSig = this.squadSignature();
+    this.rendering = false;
     this.syncShowcase();
   }
 
@@ -138,7 +194,7 @@ export class MainMenu {
         Turn on hardware acceleration (Chrome/Edge: Settings → System → <i>Use graphics acceleration when available</i>, then restart the browser),
         update your graphics driver, or open VANGUARD.html in another browser.</div>`;
     }
-    if (this.status && this.tab !== 'online') return `<div class="m-banner">${esc(this.status)}</div>`;
+    if (this.status && this.tab !== 'online' && this.tab !== 'friends') return `<div class="m-banner">${esc(this.status)}</div>`;
     return '';
   }
 
@@ -146,6 +202,7 @@ export class MainMenu {
     switch (this.tab) {
       case 'ranked': return this.renderRanked();
       case 'online': return this.renderOnline();
+      case 'friends': return this.renderFriends();
       case 'armory': return this.renderArmory();
       case 'barracks': return this.renderBarracks();
       case 'settings': return this.renderSettings();
@@ -156,11 +213,11 @@ export class MainMenu {
   // ------------------------------------------------------------------------------------------------
   // Shared pieces
   // ------------------------------------------------------------------------------------------------
-  difficultyField(prefix, value) {
-    const adaptive = adaptiveBotLevel();
-    const opts = [['adaptive', `ADAPTIVE · LV ${adaptive.toFixed(1)}`], ...Object.entries(DIFFICULTY).map(([k, d]) => [k, d.name.toUpperCase()])];
+  difficultyField(prefix, value, squad = false) {
+    const adaptive = squad ? social.squadBotLevel(false) : adaptiveBotLevel();
+    const opts = [['adaptive', `${squad ? 'SQUAD AVERAGE' : 'ADAPTIVE'} · LV ${adaptive.toFixed(1)}`], ...Object.entries(DIFFICULTY).map(([k, d]) => [k, d.name.toUpperCase()])];
     return `<div class="m-field"><label>BOT DIFFICULTY</label><div class="m-seg">${opts.map(([k, l]) => `<button class="${value === k ? 'on' : ''}" data-${prefix}diff="${k}">${l}</button>`).join('')}</div>
-      ${value === 'adaptive' ? `<p class="m-note">Bots match your skill: they are currently <b>${difficultyName(adaptive)}</b>. They get sharper as you get better and the more you play.</p>` : ''}</div>`;
+      ${value === 'adaptive' ? `<p class="m-note">${squad ? `Bots are set to the average skill of everyone in your squad: <b>${difficultyName(adaptive)}</b>.` : `Bots match your skill: they are currently <b>${difficultyName(adaptive)}</b>. They get sharper as you get better and the more you play.`}</p>` : ''}</div>`;
   }
 
   mapField(prefix, value) {
@@ -189,24 +246,69 @@ export class MainMenu {
   // PLAY (offline vs bots)
   // ------------------------------------------------------------------------------------------------
   renderPlay() {
-    const mode = MODE_LIST.find((m) => m.id === settings.mode) || MODE_LIST[0];
+    const mode = PLAYLIST.find((m) => m.id === settings.mode) || PLAYLIST[0];
+    const squad = social.squadSize > 1;
+    const mapName = (MAP_LIST.find((m) => m.id === settings.map) || MAP_LIST[0]).name.toUpperCase();
+    let start;
+    if (!squad) {
+      start = `<button class="m-start" id="start-offline" ${this.webgl ? '' : 'disabled'}><b>START MATCH</b><small>${mode.short} · ${mapName}</small></button>`;
+    } else {
+      const size = SQUAD_TEAM_SIZE[mode.id];
+      const n = social.squadSize;
+      const problem = !size ? `${mode.name} has no teams, so squads can't play it. Pick a team mode, or leave the squad to play it solo.`
+        : n > size ? `Your squad has ${n} players but ${mode.name} allows ${size} per team.` : '';
+      start = this.squadStartButton('start-offline', `${mode.short} · ${size || '-'}V${size || '-'} · ${mapName}`, problem);
+    }
     return `
       <div class="m-split">
         <section class="m-list">
-          <h2 class="m-h">QUICK PLAY <span>OFFLINE · VS BOTS</span></h2>
-          ${MODE_LIST.map((m) => `<button class="m-row ${m.id === mode.id ? 'on' : ''}" data-omode="${m.id}">
-            <i>${MODE_ART[m.id] || '•'}</i><b>${m.name.toUpperCase()}</b><small>${esc(m.description)}</small></button>`).join('')}
+          <h2 class="m-h">QUICK PLAY <span>${squad ? 'WITH YOUR SQUAD · ONLINE' : 'OFFLINE · VS BOTS'}</span></h2>
+          ${PLAYLIST.map((m) => `<button class="m-row ${m.id === mode.id ? 'on' : ''} ${squad && !SQUAD_TEAM_SIZE[m.id] ? 'dim' : ''}" data-omode="${m.id}">
+            <i>${MODE_ART[m.id] || '•'}</i><b>${m.name.toUpperCase()}</b><small>${esc(m.description)}${squad && SQUAD_TEAM_SIZE[m.id] ? ` Squad: ${SQUAD_TEAM_SIZE[m.id]} per team.` : ''}</small></button>`).join('')}
         </section>
         <section class="m-detail">
           <h1>${mode.name.toUpperCase()}</h1>
           <p class="m-desc">${esc(mode.description)}</p>
+          ${squad ? this.squadNote(mode.id) : ''}
           ${this.mapField('o', settings.map)}
-          ${this.botsField('obots', mode.id, settings.bots)}
-          ${this.difficultyField('o', settings.difficulty)}
+          ${squad ? '' : this.botsField('obots', mode.id, settings.bots)}
+          ${this.difficultyField('o', settings.difficulty, squad)}
           ${this.weaponField()}
-          <button class="m-start" id="start-offline" ${this.webgl ? '' : 'disabled'}><b>START MATCH</b><small>${mode.short} · ${(MAP_LIST.find((m) => m.id === settings.map) || MAP_LIST[0]).name.toUpperCase()}</small></button>
+          ${start}
         </section>
       </div>`;
+  }
+
+  /** Squad info shown on PLAY / RANKED while in a squad. */
+  squadNote(playlist) {
+    const size = SQUAD_TEAM_SIZE[playlist];
+    const n = social.squadSize;
+    const names = social.members().map((m) => esc(m.n)).join(', ');
+    const bots = size ? (playlist === 'horde' ? Math.max(0, size - n) : Math.max(0, 2 * size - n)) : 0;
+    return `<p class="m-note squad-note">SQUAD OF ${n}: <b>${names}</b>. ${size ? `You all play on the same team; ${bots} bot${bots === 1 ? '' : 's'} fill the other slots, tuned to your squad's average skill (level ${social.squadBotLevel(playlist === 'ranked').toFixed(1)}).` : ''}</p>`;
+  }
+
+  /** Start button while in a squad: the leader starts for everyone, members wait (or rejoin a running match). */
+  squadStartButton(id, sub, problem) {
+    const p = social.party;
+    if (!social.isLeader) {
+      const leader = (p.members.find((m) => m.c === p.leader) || {}).n || 'the leader';
+      if (p.room) return `<button class="m-start" id="join-squad-now"><b>JOIN SQUAD MATCH</b><small>${esc((p.label || '').toUpperCase())} · IN PROGRESS</small></button>`;
+      return `<p class="m-note">Waiting for <b>${esc(leader)}</b> to start a match. Your game joins it automatically.</p>
+        <button class="m-start" id="${id}" disabled><b>WAITING FOR LEADER</b><small>${esc(leader.toUpperCase())} CHOOSES THE MODE</small></button>`;
+    }
+    return `${problem ? `<p class="m-note warn">${esc(problem)}</p>` : ''}
+      <button class="m-start" id="${id}" ${this.webgl && !problem ? '' : 'disabled'}><b>START SQUAD MATCH</b><small>${esc(sub)} · ${social.squadSize} PLAYERS</small></button>`;
+  }
+
+  async startSquad(playlist) {
+    if (this.busy) return;
+    this.setBusy(true, 'Starting your squad match…');
+    try {
+      await this.onStartSquad(playlist);
+    } catch (err) {
+      this.setBusy(false, err.message || String(err));
+    }
   }
 
   bindPlay() {
@@ -214,9 +316,12 @@ export class MainMenu {
     root.querySelectorAll('[data-omode]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ mode: b.dataset.omode }); this.render(); }));
     this.bindCommon('o', (k, v) => saveSettings({ [k]: v }));
     const bots = root.querySelector('#obots');
-    bots.addEventListener('input', () => { bots.parentElement.querySelector('output').textContent = bots.value; saveSettings({ bots: parseInt(bots.value, 10) }); });
+    if (bots) bots.addEventListener('input', () => { bots.parentElement.querySelector('output').textContent = bots.value; saveSettings({ bots: parseInt(bots.value, 10) }); });
+    const join = root.querySelector('#join-squad-now');
+    if (join) join.addEventListener('click', () => { this.click(); if (this.onJoinSquadMatch) this.onJoinSquadMatch(); });
     root.querySelector('#start-offline').addEventListener('click', () => {
       this.click();
+      if (social.squadSize > 1) { this.startSquad(settings.mode); return; }
       this.onStartOffline({ mode: settings.mode, map: settings.map, bots: settings.mode === 'horde' ? Math.min(settings.bots, 5) : settings.bots, difficulty: settings.difficulty });
     });
   }
@@ -257,7 +362,7 @@ export class MainMenu {
         </section>
         <section class="m-detail">
           <h1>RANKED PLAY</h1>
-          <p class="m-desc">Team Deathmatch, 5 vs 5, first team to 40 kills or 8 minutes. Random map. Your rank changes after every game based on the result <b>and how well you played</b>.</p>
+          <p class="m-desc">Team Deathmatch, 5 vs 5, first team to 40 kills or 8 minutes. Random map. Your rank changes after every game based on the result <b>and how well you played</b>. Squad up with up to 4 friends from the Friends tab to play it together.</p>
           <ul class="m-rules">
             <li><b>BOTS</b> Adapt to you: currently <b>${difficultyName(level)}</b> (level ${level.toFixed(1)}). Higher ranks always face sharper bots.</li>
             <li><b>MATCH GRADE</b> S, A, B, C or D from your K/D, place in the lobby, kills per minute, win and accuracy.</li>
@@ -269,14 +374,18 @@ export class MainMenu {
               <div><b style="color:${RARITY[c.rarity].color}">${c.name.toUpperCase()}</b><small>${esc(req.text)}</small>
               <div class="m-bar thin"><i style="width:${pct(req.have, req.need)}%"></i></div></div></div>`).join('')}</div>` : ''}
           <p class="m-note">Loadout: <b>${WEAPONS[settings.primary].name}</b> + ${WEAPONS.pistol.name} · camo <b>${esc(camoName(profile.equipped.camo))}</b>. Change them in the Armory.</p>
-          <button class="m-start" id="start-ranked" ${this.webgl ? '' : 'disabled'}><b>PLAY RANKED</b><small>TEAM DEATHMATCH · 5V5</small></button>
+          ${social.squadSize > 1 ? this.squadNote('ranked') + this.squadStartButton('start-ranked', 'RANKED TDM · 5V5', social.squadSize > SQUAD_TEAM_SIZE.ranked ? `Your squad has ${social.squadSize} players but Ranked allows ${SQUAD_TEAM_SIZE.ranked} per team.` : '')
+            : `<button class="m-start" id="start-ranked" ${this.webgl ? '' : 'disabled'}><b>PLAY RANKED</b><small>TEAM DEATHMATCH · 5V5</small></button>`}
         </section>
       </div>`;
   }
 
   bindRanked() {
     this.bindCommon('r', () => {});
-    this.root.querySelector('#start-ranked').addEventListener('click', () => { this.click(); this.onStartRanked(); });
+    const start = this.root.querySelector('#start-ranked');
+    if (start) start.addEventListener('click', () => { this.click(); if (social.squadSize > 1) this.startSquad('ranked'); else this.onStartRanked(); });
+    const join = this.root.querySelector('#join-squad-now');
+    if (join) join.addEventListener('click', () => { this.click(); if (this.onJoinSquadMatch) this.onJoinSquadMatch(); });
   }
 
   // ------------------------------------------------------------------------------------------------
@@ -288,7 +397,7 @@ export class MainMenu {
 
   renderOnline() {
     const v = this.hostValues();
-    const mode = MODE_LIST.find((m) => m.id === v.mode) || MODE_LIST[0];
+    const mode = PLAYLIST.find((m) => m.id === v.mode) || PLAYLIST[0];
     const warn = !webrtcSupported()
       ? '<p class="m-note warn">This browser (or the page embedding this game) blocks peer-to-peer connections, so online play is unavailable here. Open VANGUARD.html directly in Chrome, Edge, Firefox or Safari.</p>'
       : isEmbedded() ? '<p class="m-note warn">This game is running inside another page or app viewer, which may block online play. If hosting or joining fails, download VANGUARD.html and open it directly in your browser.</p>' : '';
@@ -309,7 +418,7 @@ export class MainMenu {
         <section class="m-detail">
           <h1>HOST A MATCH</h1>
           <p class="m-desc">You get a room code to send to friends. Up to ${MAX_ONLINE_PLAYERS} players; bots fill the teams. The match runs in your browser, so keep the tab open. When you leave, it ends for everyone.</p>
-          <div class="m-field"><label>MODE</label><div class="m-chips">${MODE_LIST.map((m) => `<button class="${v.mode === m.id ? 'on' : ''}" data-hmode="${m.id}">${m.name.toUpperCase()}</button>`).join('')}</div></div>
+          <div class="m-field"><label>MODE</label><div class="m-chips">${PLAYLIST.map((m) => `<button class="${v.mode === m.id ? 'on' : ''}" data-hmode="${m.id}">${m.name.toUpperCase()}</button>`).join('')}</div></div>
           ${this.mapField('h', v.map)}
           ${this.botsField('hbots', mode.id, v.bots)}
           ${this.difficultyField('h', v.difficulty)}
@@ -468,7 +577,7 @@ export class MainMenu {
           <p class="m-note">Progress is saved automatically after every match: to <b>cookies</b> ${storage.cookies ? '✔' : '✖ (this browser blocks cookies for files opened from disk)'} and to <b>browser storage</b> ${storage.local ? '✔' : '✖'}.</p>
           <div class="m-field"><label>BACKUP CODE</label><textarea id="backup-code" rows="3" readonly></textarea>
             <div class="m-chips"><button id="backup-copy">COPY BACKUP CODE</button><button id="backup-load">LOAD A CODE</button><button id="backup-reset" class="danger">RESET PROGRESS</button></div>
-            <p class="m-note" id="backup-status">Copy this code to move your progress to another browser or device.</p></div>
+            <p class="m-note" id="backup-status">Copy this code to move your progress, friend code and friends list to another browser or device.</p></div>
         </section>
       </div>`;
   }
@@ -478,7 +587,7 @@ export class MainMenu {
     root.querySelector('#m-name').addEventListener('change', (e) => { saveSettings({ name: e.target.value.trim().slice(0, 18) || settings.name }); this.render(); });
     const box = root.querySelector('#backup-code');
     const status = root.querySelector('#backup-status');
-    box.value = exportCode(profile);
+    box.value = exportCode({ ...profile, social: social.exportData() });
     root.querySelector('#backup-copy').addEventListener('click', async () => {
       this.click();
       box.removeAttribute('readonly');
@@ -496,7 +605,9 @@ export class MainMenu {
         return;
       }
       try {
-        replaceProfile(importCode(box.value));
+        const data = importCode(box.value);
+        replaceProfile(data);
+        if (data.social) social.importData(data.social);
         this.render();
       } catch (err) {
         status.textContent = err.message || 'That code could not be read.';
@@ -530,24 +641,6 @@ export class MainMenu {
   }
 }
 
-/** Small flat portrait for an operator outfit (the 3D preview shows the real model). */
-function outfitArt(o) {
-  const l = o.look;
-  const head = { helmet: '<path d="M22 20 Q32 6 42 20 Z" fill="#7d8a99"/>', cap: '<rect x="22" y="12" width="20" height="8" rx="3" fill="#7d8a99"/><rect x="18" y="18" width="14" height="3" fill="#7d8a99"/>',
-    beret: '<ellipse cx="33" cy="15" rx="12" ry="5" fill="#7d8a99"/>', boonie: '<rect x="23" y="11" width="18" height="8" fill="#7d8a99"/><rect x="15" y="18" width="34" height="3" fill="#7d8a99"/>',
-    hood: '<path d="M19 30 Q19 8 32 8 Q45 8 45 30 Z" fill="#7d8a99"/>' }[l.head] || '';
-  return `<svg class="m-outfit" viewBox="0 0 64 64">
-    <rect x="18" y="34" width="28" height="30" rx="5" fill="#5d6b79"/>
-    <rect x="22" y="38" width="20" height="16" rx="3" fill="${l.vest}"/>
-    ${l.pads ? `<rect x="12" y="34" width="10" height="6" rx="2" fill="${l.pads}"/><rect x="42" y="34" width="10" height="6" rx="2" fill="${l.pads}"/>` : ''}
-    <circle cx="32" cy="23" r="9" fill="${l.mask || '#8a6a55'}"/>
-    ${head}
-    <rect x="25" y="${l.bigVisor ? 19 : 21}" width="14" height="${l.bigVisor ? 6 : 3}" rx="1.5" fill="${l.shades ? '#0c0c0e' : l.visor}"/>
-    ${l.skull ? '<rect x="27" y="26" width="10" height="4" fill="#e6e2d8"/>' : ''}
-    ${l.trim ? `<rect x="22" y="38" width="20" height="2" fill="${l.trim}"/>` : ''}
-  </svg>`;
-}
-
 const CONTROLS_HTML = `
   <section class="set-card controls">
     <h3>CONTROLS</h3>
@@ -561,3 +654,5 @@ const CONTROLS_HTML = `
       <tr><td>Touch: other</td><td>JUMP · CROUCH · RELOAD · tap the ammo panel to switch weapon · ☰ scoreboard · II pause</td></tr>
     </table>
   </section>`;
+
+Object.assign(MainMenu.prototype, friendsTab);

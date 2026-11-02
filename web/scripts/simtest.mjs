@@ -157,3 +157,52 @@ if (failures) process.exitCode = 1;
   }
   if (failures.length) { console.log('BALLISTICS FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('ballistics checks passed');
 }
+
+// ------------------------------------------------------------------------------------------------
+// Squads and 1v1 duels
+// ------------------------------------------------------------------------------------------------
+{
+  const failures = [];
+  const { GameHost: Host } = await import('../src/shared/host.js');
+  const { TEAM } = await import('../src/shared/constants.js');
+  const noop = () => {};
+  const run = (host, secs) => { for (let t = 0; t < secs; t += 0.1) host.update(0.1); };
+
+  // 1) A squad of 3 in Ranked TDM: all humans on team A, bots fill to 5v5, warmup waits for the squad.
+  {
+    const host = new Host({ mode: 'tdm', map: 'outpost', bots: 7, difficulty: 2.1, ranked: true, party: true, expect: 3 }, { send: noop });
+    host.join('leader', 'Leader', ['rifle', 'pistol']);
+    run(host, 6);
+    if (host.game.phase !== 'warmup') failures.push(`squad match went live with 1/3 players (phase ${host.game.phase})`);
+    host.join('m1', 'Member1', ['smg', 'pistol']);
+    host.join('m2', 'Member2', ['dmr', 'pistol']);
+    run(host, 6);
+    const counts = host.game.teamCounts();
+    if (counts.humans[TEAM.A] !== 3 || counts.humans[TEAM.B] !== 0) failures.push(`squad split across teams: A ${counts.humans[TEAM.A]}, B ${counts.humans[TEAM.B]}`);
+    if (counts.total[TEAM.A] !== 5 || counts.total[TEAM.B] !== 5) failures.push(`squad teams not 5v5: ${counts.total[TEAM.A]}v${counts.total[TEAM.B]}`);
+    if (host.game.phase !== 'live') failures.push(`full squad match did not go live (phase ${host.game.phase})`);
+    console.log(`squad: 3 humans on ${counts.humans[TEAM.A] === 3 ? 'team A' : 'split teams'}, teams ${counts.total[TEAM.A]}v${counts.total[TEAM.B]}, phase ${host.game.phase}`);
+  }
+  // 2) Duel: 2 humans, no bots, first to 10 kills; a squad/duel match does not auto-restart.
+  {
+    const host = new Host({ mode: 'duel', map: 'crossfire', bots: 0, difficulty: 'normal', duel: 'showdown', expect: 2 }, { send: noop });
+    const a = host.join('a', 'Alpha', ['rifle', 'pistol']);
+    run(host, 6);
+    if (host.game.phase !== 'warmup') failures.push('duel started without the opponent');
+    const b = host.join('b', 'Bravo', ['rifle', 'pistol']);
+    run(host, 6);
+    if (host.game.entities.size !== 2) failures.push(`duel has ${host.game.entities.size} entities (bots added?)`);
+    if (host.game.phase !== 'live') failures.push('duel did not go live with both players');
+    for (let i = 0; i < 10; i++) { a.kills++; host.game.mode.onKill(a, b); }
+    if (host.game.phase !== 'ended' || !host.game.result || host.game.result.winner !== a.id) failures.push('duel did not end with the 10-kill winner');
+    run(host, 15);
+    if (host.game.restartPending || host.game.phase !== 'ended') failures.push('duel auto-restarted');
+    console.log(`duel: ${host.game.entities.size} players, winner ${host.game.result ? host.game.result.text : 'none'}, auto-restart ${host.game.restartPending ? 'yes' : 'no'}`);
+    // Time-up with equal kills is a draw.
+    const h2 = new Host({ mode: 'duel', map: 'outpost', bots: 0, duel: 'friendly', expect: 2, timeLimit: 2 }, { send: noop });
+    h2.join('a', 'A'); h2.join('b', 'B');
+    run(h2, 9);
+    if (!h2.game.result || h2.game.result.text !== 'DRAW') failures.push(`duel time-up with 0-0 was "${h2.game.result ? h2.game.result.text : 'no result'}"`);
+  }
+  if (failures.length) { console.log('SQUAD/DUEL FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('squad and duel checks passed');
+}

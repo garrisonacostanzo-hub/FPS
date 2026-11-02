@@ -7,6 +7,9 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Six game modes on three maps.** Every mode works both offline and online.
 * **Computer or phone.** Keyboard and mouse on a computer; on-screen touch controls on phones and tablets.
 * **Ranked mode:** you get a rank (Bronze to Legend) and a match grade after every game.
+* **Friends:** add friends with a friend code, see who's online and when they last played, and look at their rank, stats and skins.
+* **Squads:** invite friends to your squad and play Ranked or any team mode together on the same team.
+* **Showdown:** 1v1 a friend, either rated on its own ladder or just for fun.
 * **Adaptive bots:** they get tougher the better you are and the more you play.
 * **62 skins:** 50 weapon camos (most earned in Ranked) and 12 operator outfits.
 * **Progression:** levels, XP and career stats, saved in cookies and browser storage.
@@ -36,6 +39,58 @@ Some rules:
 * Players connect directly to the host's browser over WebRTC. The free public [PeerJS](https://peerjs.com) service is used only to find the host from the room code. If a strict network blocks a direct connection, PeerJS's public relay is tried automatically.
 * Online play doesn't work inside sandboxed embeds that block WebRTC (such as Claude's artifact viewer). Open the file directly in a browser.
 * Advanced: to use your own PeerJS signaling server, open `VANGUARD.html?signal=your-host:9000`. Everyone in a match must use the same server.
+
+## Friends, squads and Showdown 1v1
+
+Friends, squads and 1v1s need the **downloaded** `VANGUARD.html` opened in a browser, with an internet connection. Everyone needs the same file.
+
+**Adding friends**
+1. Open the **FRIENDS** tab. Your **friend code** (8 characters, like `KD28-RK4Y`) is at the top. Click **COPY** and send it to a friend.
+2. Your friend types it under **ADD A FRIEND** and clicks **SEND** (or you type theirs).
+3. The other player gets a **friend request** pop-up and clicks **ACCEPT** or **DECLINE**. After accepting, you're friends.
+
+If the other player is offline, the request waits and is delivered the next time you're both online. The friend code and friends list are saved with your progress and are included in the BARRACKS backup code.
+
+**What you can see about a friend**
+* **Online status:** online in the menu, in a match (and which one), or offline with *last seen*.
+* **Last played:** when they last finished a match.
+* **Profile:** level, Ranked rank and SR (and their peak), Showdown title and rating, career stats (matches, wins, K/D, kills, headshots, accuracy, time played, MVPs, best streak, ranked games), skill rating, and your head-to-head 1v1 record.
+* **Skins:** their equipped camo and operator (the 3D model in the menu changes to their look), plus every camo and operator they have unlocked.
+
+Profiles update whenever you're both online. When a friend is offline you see their profile as it was the last time you were both on, with a "last synced" time.
+
+**Squads (play together)**
+* The squad bar in the menu header shows you and your squad. Click **+** (or **INVITE** next to an online friend) to invite someone. They get a pop-up and click **JOIN**.
+* A squad can be **as big as one team of the mode**:
+
+  | Mode | Squad size |
+  |---|---|
+  | Ranked TDM | 5 |
+  | Team Deathmatch | 6 |
+  | Domination | 6 |
+  | Elimination | 4 |
+  | Horde | 4 |
+
+  Free-for-All and Gun Game have no teams, so squads can't play them.
+* **The squad leader picks the mode** (PLAY or RANKED tab) and clicks **START SQUAD MATCH**. The leader's browser hosts the match, and everyone else's game joins it automatically. The countdown waits until the whole squad is in.
+* **Everyone in the squad is on the same team.** Bots fill the remaining slots on both teams.
+* **Bots are tuned to the squad's average skill.** For Ranked, the average is each member's Ranked bot level; otherwise it's each member's adaptive level, unless the leader picks a fixed difficulty.
+* In **Ranked**, everyone's own SR, grade and unlocks update from their own performance.
+* After a squad match the leader can **PLAY AGAIN** (Ranked picks a new random map and re-tunes the bots), and the squad is pulled into the next match. **BACK TO LOBBY** returns you to the menu and you stay in the squad.
+* The leader can remove members or **DISBAND** the squad. Members can **LEAVE**. If the leader goes offline, the squad ends.
+
+**Showdown (1v1 against a friend)**
+Select an online friend on the FRIENDS tab, choose a map (or Random), then pick:
+* **SHOWDOWN 1V1:** rated. This is a separate ladder from Ranked, with its own rating and titles.
+* **FRIENDLY 1V1:** no rating change.
+
+Your friend gets a challenge pop-up. When they accept, your game hosts the duel and theirs joins. **First to 10 kills wins**, or the most kills after 6 minutes (a tie is a draw). If your opponent leaves mid-match, you win. The challenger gets a **REMATCH** button at the end.
+
+* **Showdown rating** starts at 1000 and uses Elo: expected score = 1 / (1 + 10^((opponent − you)/400)), change = K × (result − expected), where K is 40 for your first 10 Showdowns and 24 after that.
+* **Titles:** Rookie (below 900), Contender (900), Gunslinger (1100), Duelist (1300), Marksman (1500), Deadeye (1700) and Showdown Champion (1900+).
+* **Both kinds of 1v1 still train your skill rating:** your friend's skill rating takes the place of the bot level in the adaptive-bot algorithm. Beating better friends makes your normal bots harder, and losing makes them easier.
+
+**How it connects:** when the game is open, your browser registers your friend code with the same free PeerJS matchmaking service used for room codes. Friends' browsers then connect directly to each other (WebRTC) to share online status, profiles, requests, invites and challenges. There is no game server and no account. Squad matches and 1v1s are ordinary online rooms hosted by the squad leader or the challenger. If the same friend code is open in two tabs, only the first one is online.
 
 ## Play on a phone or tablet
 
@@ -174,12 +229,13 @@ The main menu is styled like a modern military shooter. A live 3D scene shows yo
 |---|---|
 | **PLAY** | Offline matches against bots: mode, map, bot count, difficulty (Adaptive or a fixed level) and weapon. |
 | **RANKED** | Your rank emblem, SR and progress to the next division, season stats, recent matches, the next camo rewards and **PLAY RANKED**. |
+| **FRIENDS** | Your friend code, adding friends, requests, your squad, invites and challenges, your friends list, and each friend's profile with squad invite and 1v1 buttons. A red badge counts new requests and invites. |
 | **ONLINE** | Host a match and get a room code, or join one with a code. |
 | **ARMORY** | Weapon camos (50), operator outfits (12) and your loadout. Each item shows a live 3D preview, its rarity and how to unlock it. |
 | **BARRACKS** | Career stats, your skill rating and adaptive bot level, your callsign, and save data (backup code and reset). |
 | **SETTINGS** | All options and controls. |
 
-The player card in the top right shows your level, XP and rank.
+The player card in the top right shows your level, XP and rank. Next to it, the squad bar shows you and your squad members, with **+** slots for inviting friends.
 
 ## Ranked
 
@@ -256,6 +312,8 @@ The following are saved after every match:
 * career stats
 * skill rating
 * Ranked SR and history
+* Showdown rating and history
+* friend code, friends list and pending requests (saved separately as `vg_social`)
 * unlocks
 * equipped skins
 
@@ -374,18 +432,22 @@ web/
    │  ├─ map.js             # procedural map builders, zones, spawns, cover points
    │  ├─ nav.js             # 2.5D nav grid + A* + path smoothing
    │  ├─ bots.js            # bot brain: perception, FSM, steering, aim
-   │  ├─ modes.js           # TDM / DOM / FFA / Gun Game / Elimination / Horde
+   │  ├─ modes.js           # TDM / DOM / FFA / Gun Game / Elimination / Horde / 1v1 Duel, squad sizes
    │  ├─ difficulty.js      # continuous bot levels (blends Recruit..Apex presets)
    │  ├─ ballistics.js      # bullet flight (velocity, drag, gravity), materials and penetration
-   │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers
+   │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers, Showdown titles
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
    │  └─ host.js            # fixed-tick match host, client bindings, network messages
    └─ client/               # browser only
       ├─ main.js            # entry: menu ↔ session, Ranked and adaptive-difficulty setup
-      ├─ menu.js            # CoD-style menu: Play, Ranked, Online, Armory, Barracks, Settings
-      ├─ profile.js         # level/XP, stats, skill rating algorithm, Ranked SR, unlocks
+      ├─ menu.js            # CoD-style menu: Play, Ranked, Friends, Online, Armory, Barracks, Settings
+      ├─ profile.js         # level/XP, stats, skill rating algorithm, Ranked SR, Showdown rating, unlocks
+      ├─ social.js          # friend codes, presence, friend requests, squads, 1v1 challenges (peer-to-peer)
+      ├─ ui/friendsTab.js   # FRIENDS tab, friend profiles and the squad bar
+      ├─ ui/toasts.js       # pop-up notifications (requests, invites, challenges)
+      ├─ ui/art.js          # small SVG operator portraits
       ├─ storage.js         # saves to cookies + localStorage, backup codes
-      ├─ ui/emblems.js      # rank emblems and level badges (SVG)
+      ├─ ui/emblems.js      # rank emblems, Showdown emblems and level badges (SVG)
       ├─ gfx/textures.js    # procedural surfaces + normal maps, the 50 camo patterns
       ├─ gfx/models.js      # detailed guns (sights, camos), operators (outfits), first-person arms
       ├─ gfx/sky.js         # physically based sky (baked to a cube map) + environment lighting, night sky

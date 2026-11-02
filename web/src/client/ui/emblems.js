@@ -1,5 +1,5 @@
 // SVG emblems: Ranked tier badges (shield with tier colour and division pips) and level badges.
-import { rankForSr } from '../../shared/cosmetics.js';
+import { rankForSr, showdownTitle } from '../../shared/cosmetics.js';
 
 const ROMAN = ['', 'I', 'II', 'III'];
 
@@ -29,5 +29,23 @@ export function levelBadge(level, size = 40) {
   return `<svg class="lvl-badge" width="${size}" height="${size}" viewBox="0 0 40 40" aria-label="Level ${level}">
     <path d="M20 2 L36 11 L36 29 L20 38 L4 29 L4 11 Z" fill="#0c0d10" stroke="${tierColor}" stroke-width="2.5"/>
     <text x="20" y="26" text-anchor="middle" font-family="Barlow Condensed, Arial Narrow, sans-serif" font-weight="700" font-size="15" fill="#fff">${level}</text>
+  </svg>`;
+}
+
+/** Showdown (1v1 ladder) emblem: crossed pistols on a diamond in the title's colour. */
+export function showdownEmblem(rating, size = 64) {
+  const t = showdownTitle(rating);
+  const c = t.color;
+  const id = 's' + Math.random().toString(36).slice(2, 8);
+  const pips = Array.from({ length: t.index }, (_, i) => `<circle cx="${32 - (t.index - 1) * 4.5 + i * 9}" cy="64" r="2.6" fill="${c}"/>`).join('');
+  return `<svg class="emblem" width="${size}" height="${size}" viewBox="0 0 64 72" aria-label="${t.name}">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c}"/><stop offset="1" stop-color="${c}" stop-opacity="0.45"/></linearGradient></defs>
+    <path d="M32 4 L58 30 L32 56 L6 30 Z" fill="url(#${id})" stroke="#0c0d10" stroke-width="3"/>
+    <path d="M32 10 L52 30 L32 50 L12 30 Z" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.4"/>
+    <g fill="#0c0d10" transform="translate(32 30)">
+      <g transform="rotate(-40)"><rect x="-14" y="-3" width="20" height="5" rx="1"/><rect x="2" y="1" width="5" height="9" rx="1.5"/></g>
+      <g transform="rotate(40) scale(-1 1)"><rect x="-14" y="-3" width="20" height="5" rx="1"/><rect x="2" y="1" width="5" height="9" rx="1.5"/></g>
+    </g>
+    ${pips}
   </svg>`;
 }

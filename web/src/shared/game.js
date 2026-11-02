@@ -17,6 +17,7 @@ import { World } from './world.js';
 const HISTORY_LEN = Math.ceil(HISTORY_SECONDS * TICK_RATE) + 4;
 const WARMUP = 4;
 const END_SCREEN = 12;
+const WAIT_FOR_PLAYERS = 45;
 
 const mapCache = new Map();
 
@@ -53,6 +54,12 @@ export class Game {
       ranked: !!config.ranked,
       scoreLimit: config.scoreLimit || 0,
       timeLimit: config.timeLimit || 0,
+      // Squad (party) match: every human plays on team A together, bots fill both teams.
+      party: !!config.party,
+      // 1v1 against a friend: 'showdown' (rated) or 'friendly'.
+      duel: config.duel === 'showdown' || config.duel === 'friendly' ? config.duel : '',
+      // Humans expected (squad size / 2 for a duel): warmup waits for them to join, for up to WAIT_FOR_PLAYERS s.
+      expect: clamp(config.expect | 0, 0, 8),
     };
     const bundle = loadMapBundle(this.config.map);
     this.map = bundle.map;
@@ -87,6 +94,7 @@ export class Game {
     this.result = null;
     this.phase = 'warmup';
     this.phaseEnd = this.time + WARMUP;
+    this.waitUntil = this.config.expect > 1 ? this.time + WAIT_FOR_PLAYERS : 0;
     for (const e of this.entities.values()) {
       e.kills = 0; e.deaths = 0; e.score = 0; e.tier = 0; e.streak = 0;
     }
@@ -181,6 +189,10 @@ export class Game {
 
   removeBots(team) {
     for (const e of [...this.entities.values()]) if (e.isBot && e.team === team) this.removeEntity(e.id);
+  }
+
+  waitingForPlayers() {
+    return this.config.expect > 1 && this.humanCount() < this.config.expect && this.time < this.waitUntil;
   }
 
   humanCount() {
@@ -346,7 +358,11 @@ export class Game {
     this.tick++;
     if (this.noises.length > 64) this.noises.splice(0, this.noises.length - 64);
 
-    if (this.phase === 'warmup' && this.time >= this.phaseEnd) this.goLive();
+    if (this.phase === 'warmup' && this.time >= this.phaseEnd) {
+      // Squad and duel matches hold the countdown until everyone who was invited has joined (or gave up).
+      if (this.waitingForPlayers()) this.phaseEnd = this.time + 1;
+      else this.goLive();
+    }
 
     for (const e of this.entities.values()) {
       if (e.isBot) {
@@ -377,7 +393,8 @@ export class Game {
 
     this.stepBullets(dt);
     if (this.phase !== 'ended') this.mode.update(dt);
-    if (this.phase === 'ended' && this.time >= this.phaseEnd) {
+    // Squad and duel matches do not loop: the squad leader / challenger queues the next one from the end screen.
+    if (this.phase === 'ended' && this.time >= this.phaseEnd && !this.config.party && !this.config.duel) {
       this.restartPending = true;
     }
 
@@ -734,6 +751,7 @@ export class Game {
     return {
       ph: this.phase,
       tl: Math.max(0, Math.round((this.phaseEnd - this.time) * 10) / 10),
+      ...(this.phase === 'warmup' && this.waitingForPlayers() ? { wf: [this.humanCount(), this.config.expect] } : null),
       ...this.mode.hud(),
       res: this.result ? [this.result.team, this.result.winner ?? -1, this.result.text] : null,
     };

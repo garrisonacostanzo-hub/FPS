@@ -11,7 +11,9 @@
 //      hours). Adaptive bots are set to level = R + 0.3*X, so regulars face slightly sharper bots than their raw skill.
 //   4. Ranked uses max(adaptive level, a floor for the current rank tier), so climbing ranks always gets harder.
 //   5. Ranked SR = per-game result and grade, plus a pull toward 1500 SR per point of skill rating (see below).
-import { CAMOS, OUTFITS, RANK_TIERS, camoById, outfitById, rankForSr, sanitizeCamo, sanitizeOutfit } from '../shared/cosmetics.js';
+import {
+  CAMOS, OUTFITS, RANK_TIERS, SHOWDOWN_START, camoById, outfitById, rankForSr, sanitizeCamo, sanitizeOutfit, showdownTitle,
+} from '../shared/cosmetics.js';
 import { MAX_BOT_LEVEL } from '../shared/difficulty.js';
 import { loadData, saveData } from './storage.js';
 
@@ -25,6 +27,9 @@ function defaults() {
     stats: { matches: 0, wins: 0, losses: 0, draws: 0, kills: 0, deaths: 0, headshots: 0, shots: 0, hits: 0, seconds: 0, bestStreak: 0, mvps: 0 },
     skill: { rating: 1.0, matches: 0 },
     ranked: { sr: 0, peak: 0, played: 0, wins: 0, losses: 0, kills: 0, headshots: 0, gradeA: 0, gradeS: 0, streak: 0, bestStreak: 0, mvp: 0, history: [] },
+    // Showdown (rated 1v1 vs friends) and friendly 1v1s.
+    duel: { rating: SHOWDOWN_START, peak: SHOWDOWN_START, played: 0, wins: 0, losses: 0, draws: 0, streak: 0, bestStreak: 0, friendly: 0, friendlyWins: 0, history: [] },
+    lastPlayed: 0,
     equipped: { camo: 'default', outfit: 'rifleman' },
     seen: [],   // unlock ids already announced
   };
@@ -228,8 +233,11 @@ export function recordMatch(m) {
   st.bestStreak = Math.max(st.bestStreak, m.bestStreak || 0);
   if (m.place === 1 && m.players > 1) st.mvps++;
 
-  // Skill rating only learns from real matches against bots (not abandoned ones under a minute).
-  const skill = !m.abandoned || m.seconds > 60 ? updateSkill(p, m.botLevel ?? 1) : { before: profile.skill.rating, after: profile.skill.rating };
+  // Skill rating learns from every real match (not abandoned ones under a minute). In a 1v1 the opponent's own skill
+  // rating takes the place of the bot level, so beating friends makes your normal adaptive bots harder too.
+  const opponentLevel = m.duel ? clamp(Number(m.duel.oppSkill) || 1, 0, MAX_BOT_LEVEL) : m.botLevel ?? 1;
+  const skill = !m.abandoned || m.seconds > 60 ? updateSkill(p, opponentLevel) : { before: profile.skill.rating, after: profile.skill.rating };
+  profile.lastPlayed = Date.now();
 
   // XP: score, kills, result, performance; Ranked gives a bonus.
   const xp = Math.round((m.score * 1.0 + m.kills * 50 + m.headshots * 25 + (m.result === 'win' ? 500 : m.result === 'draw' ? 250 : 150)
@@ -256,9 +264,62 @@ export function recordMatch(m) {
     ranked = { before, after: r.sr, delta, rankBefore, rankAfter, promoted: rankAfter.step > rankBefore.step, demoted: rankAfter.step < rankBefore.step };
   }
 
+  const duel = m.duel ? recordDuel(m) : null;
+
   const unlocks = newUnlocks();
   saveProfile();
-  return { p, grade, xp, levelBefore, levelAfter: profile.level, levelUps, xpBefore, xpAfter: profile.xp, skill, ranked, unlocks, result: m.result, abandoned: !!m.abandoned };
+  return { p, grade, xp, levelBefore, levelAfter: profile.level, levelUps, xpBefore, xpAfter: profile.xp, skill, ranked, duel, unlocks, result: m.result, abandoned: !!m.abandoned };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Showdown (1v1 vs friends)
+// ------------------------------------------------------------------------------------------------
+// Elo: expected = 1 / (1 + 10^((opponent - you) / 400)); change = K * (score - expected), score 1 / 0.5 / 0.
+// K is 40 for your first 10 Showdowns (fast placement), then 24. Each player's game updates its own rating from the
+// opponent's rating at the start of the match, so both sides move by the same amount.
+export const showdownK = (played) => (played < 10 ? 40 : 24);
+
+function recordDuel(m) {
+  const d = profile.duel;
+  const kind = m.duel.kind === 'showdown' ? 'showdown' : 'friendly';
+  const score = m.result === 'win' ? 1 : m.result === 'draw' ? 0.5 : 0;
+  if (kind === 'friendly') {
+    d.friendly++;
+    if (score === 1) d.friendlyWins++;
+    return { kind, before: d.rating, after: d.rating, delta: 0, title: showdownTitle(d.rating), titleBefore: showdownTitle(d.rating), opp: m.duel.oppName || '' };
+  }
+  const before = d.rating;
+  const opp = Number.isFinite(Number(m.duel.oppRating)) ? Number(m.duel.oppRating) : SHOWDOWN_START;
+  const expected = 1 / (1 + Math.pow(10, (opp - before) / 400));
+  const delta = Math.round(showdownK(d.played) * (score - expected));
+  d.rating = Math.max(100, before + delta);
+  d.peak = Math.max(d.peak, d.rating);
+  d.played++;
+  if (score === 1) { d.wins++; d.streak++; } else { if (score === 0) d.losses++; else d.draws++; d.streak = 0; }
+  d.bestStreak = Math.max(d.bestStreak, d.streak);
+  d.history.unshift({ d: delta, w: score === 1 ? 1 : score === 0 ? -1 : 0, o: String(m.duel.oppName || '').slice(0, 18), k: m.kills, de: m.deaths, r: d.rating, t: Date.now() });
+  d.history.length = Math.min(d.history.length, 15);
+  return { kind, before, after: d.rating, delta, title: showdownTitle(d.rating), titleBefore: showdownTitle(before), opp: m.duel.oppName || '' };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Profile card: the summary friends see (sent peer-to-peer, see social.js)
+// ------------------------------------------------------------------------------------------------
+export function profileCard() {
+  const st = profile.stats, r = profile.ranked, d = profile.duel;
+  return {
+    lv: profile.level,
+    st: { m: st.matches, w: st.wins, l: st.losses, k: st.kills, d: st.deaths, hs: st.headshots, sh: st.shots, hi: st.hits, s: st.seconds, bs: st.bestStreak, mv: st.mvps },
+    rk: { sr: r.sr, pk: r.peak, p: r.played, w: r.wins, l: r.losses },
+    sd: { r: d.rating, pk: d.peak, p: d.played, w: d.wins, l: d.losses, dr: d.draws },
+    sk: Math.round(profile.skill.rating * 100) / 100,
+    al: Math.round(adaptiveBotLevel() * 100) / 100,
+    rl: Math.round(rankedBotLevel() * 100) / 100,
+    eq: { camo: profile.equipped.camo, outfit: profile.equipped.outfit },
+    cm: CAMOS.filter((c) => isCamoUnlocked(c.id)).map((c) => c.id),
+    of: OUTFITS.filter((o) => isOutfitUnlocked(o.id)).map((o) => o.id),
+    lp: profile.lastPlayed,
+  };
 }
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }

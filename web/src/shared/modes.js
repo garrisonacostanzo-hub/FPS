@@ -11,7 +11,12 @@ export const MODE_LIST = [
   { id: 'gungame', name: 'Gun Game', short: 'GG', description: 'Every kill upgrades your weapon. Finish the ladder to win.', teams: false },
   { id: 'elim', name: 'Elimination', short: 'ELIM', description: 'Round based, no respawns. Wipe the enemy team to win a round.', teams: true },
   { id: 'horde', name: 'Horde (Co-op)', short: 'HORDE', description: 'Survive escalating waves of enemy bots with your squad.', teams: true, coop: true },
+  // Only reachable by challenging a friend (Friends tab), so it is hidden from the playlists.
+  { id: 'duel', name: '1v1 Duel', short: '1V1', description: 'You against one friend. First to 10 kills, or most kills after 6 minutes.', teams: false, hidden: true },
 ];
+
+/** Players per team when a squad plays a mode together (the squad can be at most this big). */
+export const SQUAD_TEAM_SIZE = { ranked: 5, tdm: 6, dom: 6, elim: 4, horde: 4 };
 
 class BaseMode {
   constructor(game) {
@@ -38,6 +43,7 @@ class BaseMode {
   /** Assigns a team to a new combatant. */
   assignTeam(entity) {
     if (!this.teams) return TEAM.NONE;
+    if (!entity.isBot && this.cfg.party) return TEAM.A; // a squad always plays together
     const counts = this.game.teamCounts();
     if (!entity.isBot) {
       const humansA = counts.humans[0], humansB = counts.humans[1];
@@ -407,7 +413,21 @@ class Horde extends BaseMode {
   }
 }
 
-const MODES = { tdm: TeamDeathmatch, dom: Domination, ffa: FreeForAll, gungame: GunGame, elim: Elimination, horde: Horde };
+// ------------------------------------------------------------------------------------------------
+class Duel extends FreeForAll {
+  get scoreLimit() { return this.cfg.scoreLimit || 10; }
+  get timeLimit() { return this.cfg.timeLimit || 360; }
+  respawnDelay() { return 2.5; }
+
+  onTimeUp() {
+    const players = [...this.game.entities.values()].filter((e) => !e.isBot).sort((a, b) => b.kills - a.kills);
+    const [a, b] = players;
+    if (!a || (b && a.kills === b.kills)) this.game.finish({ team: TEAM.NONE, winner: -1, text: 'DRAW' });
+    else this.game.finish({ team: TEAM.NONE, winner: a.id, text: a.name + ' WINS' });
+  }
+}
+
+const MODES = { tdm: TeamDeathmatch, dom: Domination, ffa: FreeForAll, gungame: GunGame, elim: Elimination, horde: Horde, duel: Duel };
 
 export function createMode(id, game) {
   const Mode = MODES[id] || TeamDeathmatch;

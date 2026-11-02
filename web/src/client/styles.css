@@ -492,3 +492,99 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
 #breath .bar i { display: block; height: 100%; background: #c8ff00; }
 #breath.holding span { color: #c8ff00; }
 #breath.recovering span { color: #ff6a5d; } #breath.recovering .bar i { background: #ff6a5d; }
+
+/* ---------------------------------------------------------------- friends, squads, toasts */
+.m-tab { position: relative; }
+.m-badge { position: absolute; top: 2px; right: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #ff4a3d; color: #fff; font-style: normal; font-size: 12px; line-height: 18px; letter-spacing: 0; text-align: center; }
+.m-squad-wrap { display: flex; }
+.m-top { row-gap: 6px; }
+.m-tab { font-size: 17px; padding: 10px 11px 8px; letter-spacing: 2px; }
+.m-squad { display: flex; flex-direction: column; gap: 3px; }
+.m-squad > small { font-size: 11px; letter-spacing: 2.5px; color: rgba(255,255,255,0.55); }
+.sq-slots { display: flex; gap: 4px; }
+.sq-slot { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 62px; height: 52px; background: var(--m-panel); border: 1px solid var(--m-line); padding: 2px; }
+.sq-slot.me { border-color: var(--m-accent); }
+.sq-slot b { font-size: 11px; letter-spacing: 0.5px; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; }
+.sq-slot em { position: absolute; top: 1px; left: 4px; font-style: normal; color: var(--m-accent); font-size: 12px; }
+.sq-slot.add { font-size: 26px; color: rgba(255,255,255,0.45); border-style: dashed; }
+.sq-slot.add:hover { color: #fff; border-color: var(--m-accent); }
+@media (max-width: 1560px) {
+  /* Not enough room beside the tabs: the squad goes on its own line under the player card. */
+  .m-squad-wrap { order: 5; flex-basis: 100%; justify-content: flex-end; }
+  .m-squad { flex-direction: row; align-items: center; gap: 10px; }
+  .sq-slot { height: 44px; }
+}
+.m-row.dim { opacity: 0.45; }
+.m-split.friends { grid-template-columns: minmax(330px, 520px) minmax(330px, 560px); }
+.fr-col { gap: 6px; }
+.fr-code { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--m-panel); border: 1px solid var(--m-line); border-left: 4px solid var(--m-accent); padding: 10px 14px; }
+.fr-code small { display: block; font-size: 12px; letter-spacing: 2.5px; color: rgba(255,255,255,0.55); }
+.fr-code b { font-size: 34px; letter-spacing: 6px; font-family: ui-monospace, Menlo, Consolas, monospace; user-select: all; }
+.fr-state { display: flex; gap: 8px; align-items: baseline; }
+.fr-state.ok { color: rgba(200,255,0,0.85); }
+.fr-state.warn { color: #ffd38a; }
+.fr-add input { font-size: 24px !important; letter-spacing: 5px !important; }
+.fr-dot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; background: #5b616b; box-shadow: 0 0 0 2px rgba(0,0,0,0.4); }
+.fr-dot.on { background: #4cd964; box-shadow: 0 0 8px #4cd964; }
+.fr-dot.match { background: #ffb02e; box-shadow: 0 0 8px #ffb02e; }
+.fr-row { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 10px; background: rgba(9,11,14,0.72); border: 1px solid var(--m-line); border-left: 3px solid transparent; padding: 7px 10px; cursor: pointer; }
+.fr-row:hover { border-left-color: var(--m-accent); background: rgba(255,255,255,0.08); }
+.fr-row.on { border-left-color: var(--m-accent); background: rgba(255,255,255,0.12); }
+.fr-row.req, .fr-row.invite, .fr-row.sq { cursor: default; }
+.fr-row.invite { border-left-color: var(--m-accent); }
+.fr-row b { display: block; font-size: 19px; letter-spacing: 1px; text-transform: uppercase; }
+.fr-row small { font-size: 12.5px; letter-spacing: 1.2px; color: rgba(255,255,255,0.55); }
+.fr-btns { display: flex; align-items: center; gap: 6px; }
+.fr-btns .emblem { display: block; }
+.mini.primary, .m-chips button.primary { background: var(--m-accent); color: #0b0c0e; border-color: var(--m-accent); font-weight: 700; }
+.mini:disabled, .m-chips button:disabled { opacity: 0.45; cursor: not-allowed; }
+.fr-on { color: #4cd964; } .fr-on.match { color: #ffb02e; } .fr-off { color: rgba(255,255,255,0.45); }
+.sq-crown { color: var(--m-accent); font-size: 14px; text-align: center; }
+.fr-squad { display: flex; flex-direction: column; gap: 6px; }
+.fr-detail { gap: 10px; }
+.fr-head { display: flex; align-items: center; gap: 12px; }
+.fr-head small { font-size: 13px; letter-spacing: 2px; color: rgba(255,255,255,0.55); }
+.fr-status { margin: 0; display: flex; gap: 8px; align-items: center; font-size: 16px; letter-spacing: 1.5px; font-weight: 600; }
+.fr-ranks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fr-ranks > div, .fr-ladder { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); padding: 8px 10px; }
+.fr-ranks small, .fr-ladder small { display: block; font-size: 12px; letter-spacing: 1.8px; color: rgba(255,255,255,0.55); }
+.fr-ranks b, .fr-ladder b { display: block; font-size: 22px; letter-spacing: 1.5px; }
+.fr-h2h { margin: 0; font-size: 16px; letter-spacing: 2px; color: rgba(255,255,255,0.7); }
+.fr-h2h .up { color: #4cd964; } .fr-h2h .down { color: #ff6a5d; }
+.fr-equip { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fr-equip > div { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); padding: 6px; border-bottom: 3px solid var(--rar); }
+.fr-equip small { display: block; font-size: 11px; letter-spacing: 2px; color: rgba(255,255,255,0.55); }
+.fr-equip b { font-size: 17px; letter-spacing: 1px; }
+.fr-equip .m-outfit { width: 54px; height: 54px; }
+.fr-skins { display: flex; flex-wrap: wrap; gap: 4px; }
+.fr-skins .m-swatch { width: 38px; height: 28px; border-width: 0 0 3px; }
+.fr-skins.ops span { display: block; width: 38px; height: 38px; border-bottom: 3px solid; background: rgba(255,255,255,0.05); }
+.fr-skins.ops .m-outfit { width: 38px; height: 38px; }
+.fr-duel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fr-duel .m-start { margin-top: 0; }
+.fr-duel .m-start b { font-size: 22px; }
+.m-start.alt { background: rgba(255,255,255,0.12); color: #fff; border: 1px solid var(--m-line); }
+.squad-note { border-left: 3px solid var(--m-accent); padding-left: 10px; color: rgba(255,255,255,0.75); }
+.toasts { position: fixed; top: 14px; right: 14px; z-index: 50; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 28px)); pointer-events: none; }
+.toasts.hidden { display: none; }
+.toast { position: relative; pointer-events: auto; background: rgba(9, 11, 14, 0.94); border: 1px solid rgba(255,255,255,0.14); border-left: 4px solid #c8ff00; padding: 10px 34px 10px 12px; color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.5); animation: toast-in 0.18s ease-out; }
+.toast b { display: block; font-size: 13px; letter-spacing: 2.5px; color: #c8ff00; margin-bottom: 2px; }
+.toast p { margin: 0; font-size: 16px; line-height: 1.35; }
+.toast-actions { display: flex; gap: 6px; margin-top: 8px; }
+.toast-actions button { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.16); padding: 6px 14px; font-size: 15px; letter-spacing: 1.5px; font-weight: 600; }
+.toast-actions button.primary { background: #c8ff00; color: #0b0c0e; border-color: #c8ff00; }
+.toast-x { position: absolute; top: 4px; right: 4px; background: none; border: 0; color: rgba(255,255,255,0.5); font-size: 14px; padding: 4px 8px; }
+@keyframes toast-in { from { transform: translateX(20px); opacity: 0; } }
+@media (max-width: 900px), (max-height: 560px) {
+  .m-squad-wrap { order: 4; width: 100%; justify-content: flex-start; }
+  .m-squad { flex-direction: row; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+  .m-squad > small { white-space: nowrap; }
+  .sq-slots { min-width: 0; overflow-x: auto; }
+  .sq-slot { flex: none; }
+  .sq-slot { width: 54px; height: 40px; }
+  .sq-slot .lvl-badge { width: 22px; height: 22px; }
+  .m-split.friends { grid-template-columns: 1fr; }
+  .fr-code b { font-size: 26px; letter-spacing: 4px; }
+  .fr-ranks, .fr-equip, .fr-duel { grid-template-columns: 1fr; }
+  .toasts { top: auto; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+}

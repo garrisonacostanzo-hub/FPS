@@ -8,7 +8,7 @@ import { Peer } from 'peerjs';
 import { MAX_ONLINE_PLAYERS, OFFLINE_SNAPSHOT_RATE, ONLINE_SNAPSHOT_RATE, PROTOCOL_VERSION } from '../shared/constants.js';
 import { GameHost } from '../shared/host.js';
 
-const ID_PREFIX = 'vanguard-fps-';
+export const ID_PREFIX = 'vanguard-fps-';
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const CODE_LENGTH = 5;
 const SNAP_CHANNEL_ID = 7;          // negotiated unreliable channel for snapshots
@@ -95,7 +95,7 @@ function randomCode() {
 }
 
 /** Signaling server: the free PeerJS cloud by default; "?signal=host:port" or a ws(s):// URL overrides it. */
-function signalingOptions() {
+export function signalingOptions() {
   const options = { debug: 1, config: { iceServers: ICE_SERVERS } };
   let override = null;
   try { override = new URLSearchParams(window.location.search).get('signal'); } catch { /* ignore */ }
@@ -112,7 +112,7 @@ function signalingOptions() {
   return options;
 }
 
-function createPeer(id) {
+export function createPeer(id) {
   return new Peer(id, signalingOptions());
 }
 
@@ -125,7 +125,7 @@ const POLICY_BLOCKED = 'This page is open inside a viewer that blocks online con
   + 'Offline play works here; for online play, download VANGUARD.html and open it in your web browser.';
 
 /** Calls fail(message) if the page's security policy blocks the connection to the matchmaking service. */
-function watchPolicy(fail) {
+export function watchPolicy(fail) {
   const onViolation = (e) => {
     const directive = String(e.effectiveDirective || e.violatedDirective || '');
     if (/connect-src|default-src/.test(directive)) fail(POLICY_BLOCKED);

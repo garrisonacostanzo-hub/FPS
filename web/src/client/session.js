@@ -27,9 +27,22 @@ const TOUCH_LOOK = 0.0058;          // radians per CSS pixel of finger drag at s
 const ASSIST_CONE = 4.5 * Math.PI / 180;
 
 export class ClientSession {
-  constructor({ transport, welcome, canvas, hudRoot, audio, onExit, requeueRanked }) {
+  /**
+   * @param {object} o
+   *   requeue()      "Play again" that needs a new match (Ranked, squad leader, 1v1 rematch); else restart in place
+   *   squad          { leader, label } when this is a squad match
+   *   duel           { kind: 'showdown' | 'friendly', host, opp: { code, name, sr, sk } } for a 1v1 vs a friend
+   *   onRecorded(report, session) after the result went into the profile
+   */
+  constructor({ transport, welcome, canvas, hudRoot, audio, onExit, requeue, squad, duel, onRecorded }) {
     this.transport = transport;
-    this.requeueRanked = requeueRanked;
+    this.requeue = requeue || null;
+    this.squad = squad || null;
+    this.duelInfo = welcome.cfg && welcome.cfg.duel && duel ? duel : null;
+    this.onRecorded = onRecorded || null;
+    // What guests are told when this player (as host) closes the room.
+    this.closeReason = squad && squad.leader ? 'Your squad leader went back to the lobby.' : undefined;
+    this.sawOpponent = false;
     this.audio = audio;
     this.onExit = onExit;
     this.myId = welcome.id;
@@ -174,6 +187,8 @@ export class ClientSession {
       case 'kicked':
       case 'roomClosed':
         this.exitReason = msg.reason || 'The match was closed.';
+        // 1v1: the host quitting mid-match is a win for the player who stayed.
+        if (this.duelInfo && !this.ended && this.phase === 'live' && this.match && this.match.seconds > 10) this.recordMatchResult(TEAM.NONE, this.myId, false);
         this.leave();
         return undefined;
       default:
@@ -190,6 +205,26 @@ export class ClientSession {
       if (id === this.myId) this.myTeam = team;
     }
     for (const id of [...this.roster.keys()]) if (!seen.has(id)) { this.roster.delete(id); this.renderer.removeCharacter(id); }
+    if (this.duelInfo) this.checkOpponent();
+  }
+
+  /** 1v1: if the other player leaves, the one who stayed wins (a no-show before the start just ends it). */
+  checkOpponent() {
+    const others = [...this.roster.values()].filter((r) => r.id !== this.myId && !r.isBot).length;
+    if (others > 0) { this.sawOpponent = true; return; }
+    if (!this.sawOpponent || this.ended) return;
+    this.opponentLeft();
+  }
+
+  opponentLeft() {
+    if (this.ended) return;
+    const name = this.duelInfo.opp.name;
+    if (this.phase === 'live' && this.match && this.match.seconds > 10) {
+      this.showEnd(`${name} LEFT THE MATCH`, TEAM.NONE, this.myId);
+    } else {
+      if (this.match) this.match.recorded = true; // nothing to score yet
+      this.showEnd(`${name} LEFT BEFORE THE START`, TEAM.NONE, -1);
+    }
   }
 
   onSnapshot(snap) {
@@ -360,7 +395,19 @@ export class ClientSession {
     this.input.releaseLock();
     this.hud.showPause(false);
     const report = this.recordMatchResult(team, winner, false);
-    this.hud.showEnd(text, team, this.roster, this.scores, this.myId, this.teams, this.offline, report, this.ranked);
+    this.hud.showEnd(text, team, this.roster, this.scores, this.myId, this.teams, this.offline, report, this.ranked, this.endActions());
+  }
+
+  /** End screen buttons: who can start the next match, and what everyone else is told. */
+  endActions() {
+    if (this.duelInfo) {
+      return this.duelInfo.host ? { again: 'REMATCH', leave: 'BACK TO FRIENDS' } : { hint: `${this.duelInfo.opp.name} can call a rematch…`, leave: 'BACK TO FRIENDS' };
+    }
+    if (this.squad) {
+      return this.squad.leader ? { again: this.ranked ? 'PLAY RANKED AGAIN' : 'PLAY AGAIN', leave: 'BACK TO LOBBY' } : { hint: 'Waiting for your squad leader to start the next match…', leave: 'BACK TO LOBBY' };
+    }
+    if (this.offline) return { again: this.ranked ? 'PLAY RANKED AGAIN' : 'PLAY AGAIN' };
+    return { hint: 'Next match starts automatically…' };
   }
 
   // ==============================================================================================
@@ -381,14 +428,18 @@ export class ClientSession {
     const rows = [...this.roster.values()].map((r) => ({ id: r.id, s: this.scores.get(r.id) || { score: 0, kills: 0, tier: 0 } }));
     rows.sort((a, b) => (this.modeId === 'gungame' ? b.s.tier - a.s.tier || b.s.kills - a.s.kills : b.s.score - a.s.score || b.s.kills - a.s.kills));
     const place = rows.findIndex((r) => r.id === this.myId) + 1 || rows.length;
+    const d = this.duelInfo;
     try {
-      return recordMatch({
+      const report = recordMatch({
         ranked: this.ranked, mode: this.modeId,
         kills: Math.max(mine.kills, this.match.kills), deaths: Math.max(mine.deaths, this.match.deaths),
         headshots: this.match.headshots, shots: this.match.shots, hits: this.match.hits,
         score: mine.score || this.match.kills * 100, seconds: this.match.seconds,
         result, place, players: rows.length, botLevel: this.botLevel, bestStreak: this.match.bestStreak, abandoned,
+        duel: d ? { kind: d.kind, oppRating: d.opp.sr, oppSkill: d.opp.sk, oppName: d.opp.name } : null,
       });
+      if (this.onRecorded) { try { this.onRecorded(report, this); } catch (err) { console.error(err); } }
+      return report;
     } catch (err) {
       console.error('Could not record match', err);
       return null;
@@ -417,9 +468,12 @@ export class ClientSession {
   }
 
   playAgain() {
-    // Ranked: a fresh game with a new random map and bots re-tuned to the updated skill and rank.
-    if (this.ranked && this.requeueRanked) {
-      const requeue = this.requeueRanked;
+    // Ranked, squad and 1v1 rematches start a fresh match (Ranked: new random map, bots re-tuned to the new skill).
+    if (this.requeue) {
+      const requeue = this.requeue;
+      if (this.squad) this.closeReason = 'Your squad leader is starting the next match…';
+      else if (this.duelInfo) this.closeReason = `${settings.name} wants a rematch.`;
+      this.requeued = true;
       this.leave();
       requeue();
       return;
@@ -445,8 +499,8 @@ export class ClientSession {
     this.unsubscribeSettings();
     this.hud.destroy();
     this.renderer.dispose();
-    this.transport.close();
-    if (this.onExit) this.onExit(this.transport, this.exitReason);
+    this.transport.close(this.closeReason);
+    if (this.onExit) this.onExit(this.transport, this.exitReason, this);
   }
 
   // ==============================================================================================

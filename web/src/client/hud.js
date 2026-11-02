@@ -9,7 +9,7 @@ import { difficultyName } from '../shared/difficulty.js';
 import { camoSwatch } from './gfx/textures.js';
 import { adaptiveBotLevel, rankedBotLevel, xpForLevel } from './profile.js';
 import { bindSettingsControls, renderSettingsSections, touchSettingsRelevant } from './settingsui.js';
-import { levelBadge, rankEmblem } from './ui/emblems.js';
+import { levelBadge, rankEmblem, showdownEmblem } from './ui/emblems.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -218,7 +218,9 @@ export class Hud {
     }
     const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
     let html = '';
-    const phase = m.ph === 'warmup' ? `<div class="phase">MATCH STARTS IN ${Math.ceil(m.tl)}</div>` : '';
+    const phase = m.ph !== 'warmup' ? '' : m.wf
+      ? `<div class="phase">WAITING FOR PLAYERS ${m.wf[0]} / ${m.wf[1]}</div>`
+      : `<div class="phase">MATCH STARTS IN ${Math.ceil(m.tl)}</div>`;
     const timer = m.ph === 'live' && m.tl < 9000 ? `<div class="timer">${fmt(m.tl)}</div>` : '';
     const teamScores = (s = [0, 0], lim = 1, timerHtml = timer) => `
       <div class="scores">
@@ -305,7 +307,7 @@ export class Hud {
   }
 
   /** After-action report: result, scoreboard, match grade, XP / level, Ranked SR and new unlocks. */
-  showEnd(text, team, roster, scores, myId, teams, offline, report, ranked) {
+  showEnd(text, team, roster, scores, myId, teams, offline, report, ranked, actions = {}) {
     const el = this.el.end;
     el.style.display = 'flex';
     const result = report ? report.result : null;
@@ -313,12 +315,12 @@ export class Hud {
     const color = team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ffcf4a';
     el.innerHTML = `
       <div class="aar">
-        <div class="aar-head ${result || ''}"><h1>${head}</h1><p style="color:${color}">${esc(text)}${ranked ? ' · RANKED' : ''}</p></div>
+        <div class="aar-head ${result || ''}"><h1>${head}</h1><p style="color:${color}">${esc(text)}${ranked ? ' · RANKED' : ''}${report && report.duel ? (report.duel.kind === 'showdown' ? ' · SHOWDOWN' : ' · FRIENDLY 1V1') : ''}</p></div>
         <div class="aar-body">
           <div class="end-board"></div>
           ${report ? this.renderProgress(report, ranked) : ''}
         </div>
-        <div class="end-actions">${offline ? `<button data-act="again">${ranked ? 'PLAY RANKED AGAIN' : 'PLAY AGAIN'}</button>` : '<span class="hint">Next match starts automatically…</span>'}<button data-act="leave">MAIN MENU</button></div>
+        <div class="end-actions">${actions.again ? `<button data-act="again">${esc(actions.again)}</button>` : ''}${actions.hint ? `<span class="hint">${esc(actions.hint)}</span>` : ''}<button data-act="leave">${esc(actions.leave || 'MAIN MENU')}</button></div>
       </div>`;
     this.renderScoreboard($('.end-board', el), roster, scores, myId, teams);
     el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
@@ -352,6 +354,21 @@ export class Hud {
             <small>${rk.after} SR${rk.rankAfter.next ? ` · ${rk.rankAfter.next - rk.after} to next division` : ''}</small>
           </div>
         </div>`;
+    }
+    if (r.duel && r.duel.kind === 'showdown') {
+      const dd = r.duel;
+      rankedHtml += `
+        <div class="aar-rank">
+          ${showdownEmblem(dd.after, 76)}
+          <div>
+            ${dd.title.index > dd.titleBefore.index ? '<div class="aar-flag up">NEW TITLE</div>' : dd.title.index < dd.titleBefore.index ? '<div class="aar-flag down">TITLE LOST</div>' : ''}
+            <b style="color:${dd.title.color}">${esc(dd.title.name.toUpperCase())}</b>
+            <span class="aar-sr ${dd.delta >= 0 ? 'up' : 'down'}">${dd.delta >= 0 ? '+' : ''}${dd.delta} SHOWDOWN</span>
+            <small>Showdown rating ${dd.after}${dd.title.next ? ` · ${dd.title.next - dd.after} to the next title` : ''} · vs ${esc(dd.opp)}</small>
+          </div>
+        </div>`;
+    } else if (r.duel) {
+      rankedHtml += `<div class="aar-skill">FRIENDLY 1V1 VS ${esc(String(r.duel.opp).toUpperCase())} · NO SHOWDOWN RATING CHANGE</div>`;
     }
     const unlocks = r.unlocks.length ? `
       <div class="aar-unlocks"><h3>UNLOCKED</h3>${r.unlocks.map((u) => `
