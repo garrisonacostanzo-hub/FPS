@@ -1,6 +1,6 @@
 // Shared tuning constants used by the authoritative simulation (server / offline host) and client prediction.
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 export const MAX_ONLINE_PLAYERS = 8; // humans per peer-to-peer match (the host's upload carries everyone)
 export const GAME_TITLE = 'VANGUARD';
 
