@@ -467,6 +467,18 @@ export class Hud {
     this.el.vitals.style.borderLeft = `5px solid ${color}`;
   }
 
+  /** Breath meter while aiming a scoped weapon (null hides it). */
+  setBreath(state) {
+    if (!this.el.breath) this.el.breath = this.root.querySelector('#breath');
+    const el = this.el.breath;
+    if (!state) { if (this._breathOn) { el.style.display = 'none'; this._breathOn = false; } return; }
+    if (!this._breathOn) { el.style.display = 'block'; this._breathOn = true; }
+    el.querySelector('i').style.width = (state.breath * 100).toFixed(0) + '%';
+    el.classList.toggle('holding', state.holding);
+    el.classList.toggle('recovering', state.recovering);
+    el.querySelector('span').textContent = state.recovering ? 'OUT OF BREATH' : state.holding ? 'HOLDING BREATH' : 'HOLD SHIFT TO STEADY';
+  }
+
   /** Sniper scope overlay while fully aimed. */
   setScope(on) {
     if (on === this._scope) return;
@@ -580,6 +592,7 @@ const TEMPLATE = `
   <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
   <div id="ally-tag"></div>
   <div id="scope"><i class="h"></i><i class="v"></i></div>
+  <div id="breath"><span>HOLD SHIFT TO STEADY</span><div class="bar"><i></i></div></div>
   <div id="protect">SPAWN PROTECTION</div>
   <div id="vitals"><div id="team-badge" class="label"></div><div class="label">HEALTH</div><div id="hp-value">100</div><div class="bar"><div id="hp-fill"></div></div></div>
   <div id="ammo"><div id="weapon-name"></div><div class="count"><span id="ammo-mag">30</span><span class="sep">/</span><span id="ammo-reserve">120</span></div><div id="weapon-slots"></div></div>

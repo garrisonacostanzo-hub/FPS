@@ -82,4 +82,78 @@ for (const mode of MODE_LIST) {
 }
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall simulation checks passed');
-process.exit(failures ? 1 : 0);
+if (failures) process.exitCode = 1;
+
+// ------------------------------------------------------------------------------------------------
+// Ballistics: travel time, drop, wall penetration and tactical reloads.
+// ------------------------------------------------------------------------------------------------
+{
+  const { Game } = await import('../src/shared/game.js');
+  const { World } = await import('../src/shared/world.js');
+  const { WEAPONS, createWeaponState, startReload, finishReload } = await import('../src/shared/weapons.js');
+  const failures = [];
+  const setup = (wall) => {
+    const game = new Game({ mode: 'ffa', map: 'crossfire', bots: 0 });
+    game.phase = 'live';
+    if (wall) game.world = new World([...game.map.boxes, wall], game.map.half + 2);
+    else game.world = new World([], game.map.half + 2); // open field
+    const a = game.addHuman('a', 'Shooter', ['rifle', 'pistol']);
+    const b = game.addHuman('b', 'Target', ['rifle', 'pistol']);
+    for (const e of [a, b]) { e.alive = true; e.hp = 100; e.protectUntil = 0; e.motor.y = 0; }
+    a.motor.x = 0; a.motor.z = 0;
+    b.motor.x = 0; b.motor.z = -30;
+    return { game, a, b };
+  };
+  const fire = (game, shooter, weapon, dx, dy, dz) => game.resolveShot(shooter, { ox: 0, oy: 1.62, oz: 0, dx, dy, dz, spread: 0, seed: 1, weapon });
+  const level = (dist, h = 1.62) => { const dy = (h - 1.62) / dist; const l = Math.hypot(dy, 1); return [0, dy / l, -1 / l]; };
+
+  // 1) Travel time: a rifle round needs several ticks to cover 120 m.
+  {
+    const { game, a, b } = setup(null);
+    b.motor.z = -120;
+    fire(game, a, WEAPONS.rifle, ...level(120, 1.3));
+    let ticks = 0;
+    while (b.hp === 100 && ticks < 60) { game.stepBullets(1 / 30); game.time += 1 / 30; ticks++; }
+    if (b.hp === 100) failures.push('rifle round never reached a target at 120 m');
+    else if (ticks < 4) failures.push(`rifle round arrived too fast (${ticks} ticks for 120 m)`);
+    console.log(`ballistics: rifle round reached 120 m after ${ticks} ticks (${(ticks / 30 * 1000).toFixed(0)} ms), damage ${100 - Math.round(b.hp)}`);
+  }
+  // 2) Drop: a pistol aimed dead level at a head 120 m away lands low (body or miss, not the head).
+  {
+    const { game, a, b } = setup(null);
+    b.motor.z = -120;
+    const hpBefore = b.hp;
+    fire(game, a, WEAPONS.pistol, ...level(120, 1.68));
+    for (let i = 0; i < 60; i++) { game.stepBullets(1 / 30); game.time += 1 / 30; }
+    const dealt = hpBefore - b.hp;
+    if (dealt >= WEAPONS.pistol.damage * WEAPONS.pistol.headMul * 0.5) failures.push('pistol round did not drop below the head at 120 m');
+    console.log(`ballistics: level pistol shot at a head 120 m away dealt ${Math.round(dealt)} (headshot would be ~${Math.round(WEAPONS.pistol.damage * 0.6 * WEAPONS.pistol.headMul)})`);
+  }
+  // 3) Penetration: a 0.3 m plaster wall stops pistol rounds but not rifle rounds.
+  {
+    const wall = { min: [-3, 0, -15.15], max: [3, 3, -14.85], m: 'wall' };
+    for (const [id, expectHit] of [['rifle', true], ['pistol', false]]) {
+      const { game, a, b } = setup(wall);
+      fire(game, a, WEAPONS[id], ...level(30, 1.3));
+      for (let i = 0; i < 30; i++) { game.stepBullets(1 / 30); game.time += 1 / 30; }
+      const hit = b.hp < 100;
+      if (hit !== expectHit) failures.push(`${id} through 0.3 m plaster: expected ${expectHit ? 'hit' : 'blocked'}`);
+      console.log(`ballistics: ${id} through 0.3 m plaster wall -> ${hit ? `hit for ${Math.round(100 - b.hp)}` : 'blocked'}`);
+    }
+  }
+  // 4) Tactical reload keeps one in the chamber.
+  {
+    const ws = createWeaponState(['rifle', 'pistol']);
+    ws.slots[0].mag = 10;
+    startReload(ws, 0);
+    finishReload(ws);
+    if (ws.slots[0].mag !== WEAPONS.rifle.mag + 1) failures.push(`tactical reload gave ${ws.slots[0].mag}, expected ${WEAPONS.rifle.mag + 1}`);
+    const ws2 = createWeaponState(['rifle', 'pistol']);
+    ws2.slots[0].mag = 0;
+    startReload(ws2, 0);
+    finishReload(ws2);
+    if (ws2.slots[0].mag !== WEAPONS.rifle.mag) failures.push(`empty reload gave ${ws2.slots[0].mag}, expected ${WEAPONS.rifle.mag}`);
+    console.log(`ballistics: tactical reload -> ${ws.slots[0].mag}, empty reload -> ${ws2.slots[0].mag}`);
+  }
+  if (failures.length) { console.log('BALLISTICS FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('ballistics checks passed');
+}

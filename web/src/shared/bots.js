@@ -5,6 +5,7 @@
 // rules evaluated every few hundred ms) -> state behaviour (patrol / investigate / engage / cover / reload /
 // flank / search) -> steering (A* path following, strafing) + human-like aim and trigger discipline.
 import { BTN, MOVE, TICK_DT } from './constants.js';
+import { dropAt, flightTime } from './ballistics.js';
 import { resolveDifficulty } from './difficulty.js';
 import { DEG, angleDiff, clamp, dist2, dist3, distToSegment, moveTowardsAngle, anglesFromDir } from './math.js';
 import { eyeHeightOf } from './movement.js';
@@ -725,9 +726,13 @@ export class BotBrain {
         this.err = { x: rx * k, y: ry * k * 0.7, z: rz * k };
       }
       const eyeT = tm.y + eyeHeightOf(tm);
-      const ax = tm.x + this.err.x;
-      const ay = (this.headAim ? eyeT + 0.05 : tm.y + (eyeT - tm.y) * 0.72) + this.err.y;
-      const az = tm.z + this.err.z;
+      // Ballistics: lead a moving target by the bullet's flight time and aim above for drop. Better bots do it better.
+      const w = activeWeapon(e.ws);
+      const tof = flightTime(w, dist);
+      const lead = 0.35 + 0.65 * d.accuracy;
+      const ax = tm.x + this.err.x + tm.vx * tof * lead;
+      const ay = (this.headAim ? eyeT + 0.05 : tm.y + (eyeT - tm.y) * 0.72) + this.err.y + dropAt(w, dist) * (0.4 + 0.6 * d.accuracy);
+      const az = tm.z + this.err.z + tm.vz * tof * lead;
       this.aimPoint = { x: ax, y: ay, z: az };
       const desired = anglesFromDir(ax - m.x, ay - eyeY, az - m.z);
       this.aimYaw = moveTowardsAngle(this.aimYaw, desired.yaw, speed);

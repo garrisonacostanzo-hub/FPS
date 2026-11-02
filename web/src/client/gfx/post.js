@@ -61,7 +61,7 @@ export class PostFX {
     vm.clear = false;
     vm.clearDepth = true;
     this.composer.addPass(vm);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.5, 1.15);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.35, 0.45, 1.25); // the sky stays below the threshold
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
     this.grade = new ShaderPass(GradeShader);

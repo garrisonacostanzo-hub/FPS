@@ -63,8 +63,8 @@ export function buildSky(renderer, scene, theme, quality = 'medium') {
     const u = sky.material.uniforms;
     u.turbidity.value = dusk ? 9 : 4.5;
     u.rayleigh.value = dusk ? 2.6 : 1.4;
-    u.mieCoefficient.value = dusk ? 0.005 : 0.0022;
-    u.mieDirectionalG.value = 0.86;
+    u.mieCoefficient.value = dusk ? 0.0032 : 0.0014;
+    u.mieDirectionalG.value = 0.93;
     // Visible sun a little lower than the light direction for nicer gradients.
     const elevation = dusk ? 0.16 : 0.5;
     const flat = new THREE.Vector3(sunDir.x, 0, sunDir.z).normalize();
@@ -72,9 +72,9 @@ export function buildSky(renderer, scene, theme, quality = 'medium') {
     u.cloudCoverage.value = dusk ? 0.55 : 0.42;
     u.cloudDensity.value = dusk ? 0.5 : 0.38;
     // The scattering model is physically scaled; bring it into the same range as the rest of the scene.
-    sky.material.uniforms.skyExposure = { value: dusk ? 0.55 : 0.42 };
+    sky.material.uniforms.skyExposure = { value: dusk ? 0.4 : 0.32 };
     sky.material.fragmentShader = 'uniform float skyExposure;\n' + sky.material.fragmentShader.replace(
-      'gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( min( texColor * skyExposure, vec3( 2.4 ) ), 1.0 );');
+      'gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( min( texColor * skyExposure, vec3( 1.05 ) ), 1.0 );');
     sky.material.depthWrite = false;
     sky.material.needsUpdate = true;
     skyObject = sky;

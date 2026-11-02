@@ -281,7 +281,9 @@ export class GameRenderer {
   loadMap(map, modeUsesZones) {
     const theme = map.theme || {};
     const night = theme.timeOfDay === 'night', dusk = theme.timeOfDay === 'dusk';
-    this.scene.fog = new THREE.FogExp2(theme.fog || 0xbdd4ea, (theme.fogDensity || 0.008) * 0.85);
+    const fogColor = new THREE.Color(theme.fog || 0xbdd4ea);
+    if (!night) fogColor.multiplyScalar(0.82); // match the toned-down sky so the horizon doesn't glow white
+    this.scene.fog = new THREE.FogExp2(fogColor, (theme.fogDensity || 0.008) * 0.7);
     const sky = buildSky(this.renderer, this.scene, theme, this.quality);
     this.vmScene.environment = this.scene.environment;
     this.vmScene.environmentIntensity = 0.6;
@@ -289,7 +291,7 @@ export class GameRenderer {
     const low = this.quality === 'low';
     if (low) { this.scene.environment = null; this.vmScene.environment = null; } // cheapest shading for weak devices
     this.scene.add(new THREE.HemisphereLight(night ? 0x5566aa : 0xdfeeff, night ? 0x14161c : 0x4a4232, (night ? 0.5 : 0.55) * (low ? 2.2 : 1)));
-    const sun = new THREE.DirectionalLight(night ? 0x9fb0ff : dusk ? 0xffb07a : 0xfff1dc, (theme.sunIntensity || 2.4) * (night ? 0.7 : 1.15));
+    const sun = new THREE.DirectionalLight(night ? 0x9fb0ff : dusk ? 0xffb07a : 0xfff1dc, (theme.sunIntensity || 2.4) * (night ? 0.7 : 0.95));
     sun.position.copy(sky.sunDir).multiplyScalar(120);
     sun.castShadow = this.quality !== 'low';
     const size = map.half + 10;
@@ -420,9 +422,9 @@ export class GameRenderer {
   // ------------------------------------------------------------------------------------------------
   // Effects
   // ------------------------------------------------------------------------------------------------
-  tracer(from, to, color = 0xffd27a) { this.fx.tracer(from, to, color); }
+  tracer(from, to, color = 0xffd27a, durationMs) { this.fx.tracer(from, to, color, durationMs); }
 
-  impact(point, character) { this.fx.impact(point, character); }
+  impact(point, character, material, delayMs = 0) { this.fx.impactAt(point, character, material, delayMs); }
 
   muzzleLight(position) { this.fx.muzzleLight(position); }
 

@@ -7,49 +7,49 @@ import { DEG, clamp, hash2 } from './math.js';
  */
 export const WEAPONS = {
   pistol: {
-    id: 'pistol', name: 'P9 Sidearm', slot: 1, mode: 'semi', rpm: 420, damage: 25, headMul: 2.0, pellets: 1,
+    id: 'pistol', muzzleVel: 370, drag: 0.35, pen: 12, chamber: true, name: 'P9 Sidearm', slot: 1, mode: 'semi', rpm: 420, damage: 25, headMul: 2.0, pellets: 1,
     hip: 1.8, ads: 0.4, move: 1.2, air: 4, bloom: 0.6, bloomMax: 3, bloomRecover: 8,
     recoil: [1.1, 1.5], recoilH: 0.35, mag: 12, reserve: 72, reload: 1.4, reloadEmpty: 1.7,
     range: 90, falloff: [25, 70, 0.6], adsFov: 62, adsTime: 0.14, moveMul: 0.9, equip: 0.25,
     sound: 'pistol', color: '#2b2e33', accent: '#d9a441', size: [0.045, 0.09, 0.2], barrel: 0.06, botRange: [3, 25],
   },
   smg: {
-    id: 'smg', name: 'MX-9 SMG', slot: 0, mode: 'auto', rpm: 900, damage: 19, headMul: 1.6, pellets: 1,
+    id: 'smg', muzzleVel: 400, drag: 0.30, pen: 14, chamber: true, name: 'MX-9 SMG', slot: 0, mode: 'auto', rpm: 900, damage: 19, headMul: 1.6, pellets: 1,
     hip: 2.0, ads: 0.6, move: 1.0, air: 3.5, bloom: 0.22, bloomMax: 3.5, bloomRecover: 7,
     recoil: [0.35, 0.55], recoilH: 0.45, mag: 35, reserve: 175, reload: 1.8, reloadEmpty: 2.2,
     range: 120, falloff: [15, 60, 0.5], adsFov: 62, adsTime: 0.16, moveMul: 0.85, equip: 0.35,
     sound: 'smg', color: '#26292d', accent: '#3fc1f2', size: [0.065, 0.1, 0.36], barrel: 0.14, botRange: [3, 25],
   },
   rifle: {
-    id: 'rifle', name: 'VK-12 Rifle', slot: 0, mode: 'auto', rpm: 660, damage: 26, headMul: 1.8, pellets: 1,
+    id: 'rifle', muzzleVel: 790, drag: 0.10, pen: 32, chamber: true, name: 'VK-12 Rifle', slot: 0, mode: 'auto', rpm: 660, damage: 26, headMul: 1.8, pellets: 1,
     hip: 2.6, ads: 0.2, move: 2.2, air: 4, bloom: 0.32, bloomMax: 3, bloomRecover: 6,
     recoil: [0.55, 0.85], recoilH: 0.32, mag: 30, reserve: 150, reload: 2.1, reloadEmpty: 2.6,
     range: 300, falloff: [40, 120, 0.7], adsFov: 55, adsTime: 0.22, moveMul: 0.7, equip: 0.5,
     sound: 'rifle', color: '#2a2c30', accent: '#e8862a', size: [0.07, 0.11, 0.5], barrel: 0.3, botRange: [10, 60],
   },
   shotgun: {
-    id: 'shotgun', name: 'Breacher', slot: 0, mode: 'semi', rpm: 85, damage: 13, headMul: 1.4, pellets: 9,
+    id: 'shotgun', muzzleVel: 420, drag: 0.80, pen: 6, chamber: false, name: 'Breacher', slot: 0, mode: 'semi', rpm: 85, damage: 13, headMul: 1.4, pellets: 9,
     hip: 7.5, ads: 5, move: 1, air: 2, bloom: 0, bloomMax: 0, bloomRecover: 1,
     recoil: [3.2, 4.2], recoilH: 1.1, mag: 7, reserve: 35, reload: 2.6, reloadEmpty: 3.1,
     range: 45, falloff: [8, 30, 0.25], adsFov: 65, adsTime: 0.2, moveMul: 0.75, equip: 0.55,
     sound: 'shotgun', color: '#2f2a27', accent: '#c0392b', size: [0.08, 0.12, 0.55], barrel: 0.38, botRange: [2, 12],
   },
   lmg: {
-    id: 'lmg', name: 'Bulwark LMG', slot: 0, mode: 'auto', rpm: 720, damage: 24, headMul: 1.6, pellets: 1,
+    id: 'lmg', muzzleVel: 830, drag: 0.09, pen: 40, chamber: false, name: 'Bulwark LMG', slot: 0, mode: 'auto', rpm: 720, damage: 24, headMul: 1.6, pellets: 1,
     hip: 3.4, ads: 0.6, move: 3, air: 5, bloom: 0.25, bloomMax: 4, bloomRecover: 5,
     recoil: [0.5, 0.75], recoilH: 0.55, mag: 80, reserve: 240, reload: 4.2, reloadEmpty: 4.8,
     range: 260, falloff: [40, 110, 0.65], adsFov: 55, adsTime: 0.32, moveMul: 0.55, equip: 0.8,
     sound: 'lmg', color: '#33302a', accent: '#8bc34a', size: [0.09, 0.13, 0.62], barrel: 0.34, botRange: [10, 55],
   },
   dmr: {
-    id: 'dmr', name: 'Arbiter DMR', slot: 0, mode: 'semi', rpm: 260, damage: 48, headMul: 2.0, pellets: 1,
+    id: 'dmr', muzzleVel: 840, drag: 0.07, pen: 46, chamber: true, name: 'Arbiter DMR', slot: 0, mode: 'semi', rpm: 260, damage: 48, headMul: 2.0, pellets: 1,
     hip: 3.5, ads: 0.08, move: 2.5, air: 5, bloom: 0.9, bloomMax: 3, bloomRecover: 7,
     recoil: [1.6, 2.1], recoilH: 0.4, mag: 15, reserve: 60, reload: 2.4, reloadEmpty: 2.9,
     range: 400, falloff: [70, 200, 0.8], adsFov: 40, adsTime: 0.26, moveMul: 0.65, equip: 0.55,
     sound: 'dmr', color: '#2c2f2b', accent: '#d4c34a', size: [0.07, 0.12, 0.6], barrel: 0.36, botRange: [20, 110],
   },
   sniper: {
-    id: 'sniper', name: 'Longshot', slot: 0, mode: 'semi', rpm: 50, damage: 95, headMul: 2.5, pellets: 1,
+    id: 'sniper', muzzleVel: 900, drag: 0.05, pen: 70, chamber: true, name: 'Longshot', slot: 0, mode: 'semi', rpm: 50, damage: 95, headMul: 2.5, pellets: 1,
     hip: 7, ads: 0.02, move: 4, air: 8, bloom: 2, bloomMax: 4, bloomRecover: 3,
     recoil: [2.6, 3.4], recoilH: 0.6, mag: 5, reserve: 30, reload: 2.9, reloadEmpty: 3.4,
     range: 700, falloff: [150, 600, 0.85], adsFov: 22, adsTime: 0.32, moveMul: 0.5, equip: 0.7,
@@ -143,6 +143,7 @@ export function startReload(ws, now) {
   const slot = ws.slots[ws.active];
   const w = WEAPONS[slot.id];
   const duration = slot.mag === 0 ? w.reloadEmpty : w.reload;
+  ws.tactical = slot.mag > 0; // a round stays in the chamber: the magazine ends up at capacity + 1
   ws.reloading = true;
   ws.reloadEnd = now + duration;
   ws.burst = 0;
@@ -154,7 +155,8 @@ export function finishReload(ws) {
   ws.reloading = false;
   if (!slot) return;
   const w = WEAPONS[slot.id];
-  const take = Math.min(w.mag - slot.mag, slot.reserve);
+  const capacity = w.mag + (ws.tactical && w.chamber ? 1 : 0);
+  const take = Math.max(0, Math.min(capacity - slot.mag, slot.reserve));
   slot.mag += take;
   slot.reserve -= take;
 }

@@ -110,6 +110,15 @@ export class AudioEngine {
     this.play(b);
   }
 
+  /** A bullet passing close by: a sharp crack for supersonic rounds, a whistling whiz for slow ones. */
+  nearMiss(position, supersonic) {
+    if (!this.ensure()) return;
+    const b = supersonic
+      ? this.buffer('crack', (ctx) => synth(ctx, 0.07, (t, rnd, st) => { st.lp = st.lp * 0.2 + rnd() * 0.8; return (st.lp * 2 - 1) * Math.exp(-t * 90) + Math.sin(2 * Math.PI * 2600 * t) * Math.exp(-t * 140) * 0.4; }, 0.75))
+      : this.buffer('whiz', (ctx) => synth(ctx, 0.22, (t, rnd) => Math.sin(2 * Math.PI * (1900 - t * 3600) * t) * Math.sin(Math.PI * t / 0.22) * 0.5 + (rnd() - 0.5) * 0.15 * Math.sin(Math.PI * t / 0.22), 0.55));
+    this.play(b, { volume: 0.9, rate: 0.9 + Math.random() * 0.2, position, maxDistance: 12 });
+  }
+
   hit(headshot) { this.tone(headshot ? 'hs' : 'hit', headshot ? 2300 : 1800, 0.06, 0.35); }
   kill() { this.tone('kill', 1150, 0.16, 0.45); }
   hurt() { this.tone('hurt', 140, 0.2, 0.5); }

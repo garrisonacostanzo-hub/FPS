@@ -485,3 +485,10 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
   .aar-body { grid-template-columns: 1fr; }
   .aar-head h1 { font-size: 40px; letter-spacing: 4px; }
 }
+
+#breath { position: absolute; left: 50%; top: calc(50% + min(34vmin, 300px) + 12px); transform: translateX(-50%); display: none; text-align: center; pointer-events: none; }
+#breath span { font-size: 13px; letter-spacing: 3px; color: rgba(255,255,255,0.75); text-shadow: 0 1px 2px #000; }
+#breath .bar { width: 160px; height: 4px; background: rgba(255,255,255,0.18); margin: 5px auto 0; }
+#breath .bar i { display: block; height: 100%; background: #c8ff00; }
+#breath.holding span { color: #c8ff00; }
+#breath.recovering span { color: #ff6a5d; } #breath.recovering .bar i { background: #ff6a5d; }

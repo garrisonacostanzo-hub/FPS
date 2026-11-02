@@ -131,6 +131,7 @@ export function packActor(a) {
     r3(a.clock), r3(a.aim01), a.prevFire ? 1 : 0, r3(a.sprintLock),
     ws.active, r3(ws.nextFire), r3(ws.reloadEnd), ws.reloading ? 1 : 0, r3(ws.equipEnd), r3(ws.bloom), r3(ws.lastShot),
     ws.slots.map((s) => [s.id, s.mag, s.reserve]),
+    ws.tactical ? 1 : 0,
   ];
 }
 
@@ -141,7 +142,7 @@ export function unpackActor(p, a) {
   m.coyote = p[10]; m.jumpBuffer = p[11]; m.stride = p[12];
   a.clock = p[13]; a.aim01 = p[14]; a.prevFire = p[15] === 1; a.sprintLock = p[16];
   ws.active = p[17]; ws.nextFire = p[18]; ws.reloadEnd = p[19]; ws.reloading = p[20] === 1; ws.equipEnd = p[21];
-  ws.bloom = p[22]; ws.lastShot = p[23];
+  ws.bloom = p[22]; ws.lastShot = p[23]; ws.tactical = p[25] === 1;
   const slots = p[24];
   if (ws.slots.length !== slots.length || ws.slots.some((s, i) => s.id !== slots[i][0])) {
     ws.slots = slots.map(([id, mag, reserve]) => ({ id, mag, reserve }));

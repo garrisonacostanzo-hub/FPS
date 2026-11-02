@@ -85,16 +85,17 @@ export class World {
 
   /**
    * Raycast against the ground plane and all boxes. Direction must be normalized.
-   * Returns { t, nx, ny, nz } or null.
+   * Returns { t, nx, ny, nz, box } (box is null for the ground) or null.
    */
   raycast(ox, oy, oz, dx, dy, dz, maxDist) {
     let bestT = maxDist;
     let hit = false;
     let nx = 0, ny = 1, nz = 0;
+    let box = null;
     // Ground plane y = 0.
     if (dy < -1e-6) {
       const tg = -oy / dy;
-      if (tg >= 0 && tg < bestT) { bestT = tg; hit = true; nx = 0; ny = 1; nz = 0; }
+      if (tg >= 0 && tg < bestT) { bestT = tg; hit = true; nx = 0; ny = 1; nz = 0; box = null; }
     }
 
     // Walk the grid cells covered by the ray in slices of one cell length to keep the candidate set small.
@@ -117,14 +118,14 @@ export class World {
             const b = this.boxes[index];
             const t = rayBox(ox, oy, oz, dx, dy, dz, b.min[0], b.min[1], b.min[2], b.max[0], b.max[1], b.max[2], bestT, h);
             if (t >= 0 && t < bestT) {
-              bestT = t; hit = true; nx = h.nx; ny = h.ny; nz = h.nz;
+              bestT = t; hit = true; nx = h.nx; ny = h.ny; nz = h.nz; box = b;
             }
           }
         }
       }
       if (hit && bestT <= t1) break; // nothing in later slices can be closer
     }
-    return hit ? { t: bestT, nx, ny, nz } : null;
+    return hit ? { t: bestT, nx, ny, nz, box } : null;
   }
 
   /** Unobstructed line between two points? */

@@ -96,7 +96,7 @@ export function addFoliage(scene, map, world, quality) {
   } else if (theme.timeOfDay === 'dusk') {
     // Industrial skyline: chimney stacks with blinking red lights.
     const stackMat = new THREE.MeshStandardMaterial({ color: 0x5a4a40, roughness: 0.9 });
-    const lightMat = new THREE.MeshBasicMaterial({ color: 0xff3020 });
+    const lightMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 0.4, 0.25) }); // HDR so it blooms
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2 + r() * 0.3, d = half + 25 + r() * 40, h = 30 + r() * 35;
       const stack = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 3.4, h, 12), stackMat);
@@ -109,7 +109,7 @@ export function addFoliage(scene, map, world, quality) {
   } else if (theme.timeOfDay === 'night') {
     // Street lamps along the inside of the boundary: glowing heads (bloom) and pools of light on the ground.
     const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.6, metalness: 0.5 });
-    const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffe2a8 });
+    const bulbMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 2.6, 1.8) }); // HDR so it blooms
     const c = document.createElement('canvas');
     c.width = c.height = 64;
     const g = c.getContext('2d');

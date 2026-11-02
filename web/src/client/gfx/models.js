@@ -197,7 +197,7 @@ export function buildGun(weaponId, scale = 1, camoId = 'default', detailed = tru
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, H * 0.12, -L * 0.6 - barrelLen - 0.02);
   g.add(muzzle);
-  const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: FLASH_TEXTURE(), color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: FLASH_TEXTURE(), color: new THREE.Color(2.6, 2.2, 1.7), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
   flash.scale.set(0.32, 0.32, 1);
   flash.visible = false;
   muzzle.add(flash);

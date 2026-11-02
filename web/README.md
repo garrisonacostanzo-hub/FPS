@@ -265,7 +265,67 @@ To move your progress to another browser or device, use **BARRACKS → Backup co
 
 ## Weapons
 
-Pistol, SMG, rifle, shotgun, LMG, DMR and sniper. Each weapon has its own fire rate, damage falloff, headshot multiplier, spread (hip, ADS, moving and in the air), recoil, magazine size and reload time, ADS zoom and movement speed. All of these values are in one data table: `src/shared/weapons.js`.
+Pistol, SMG, rifle, shotgun, LMG, DMR and sniper. Each weapon has its own fire rate, damage falloff, headshot multiplier, spread (hip, ADS, moving and in the air), recoil, magazine size and reload time, ADS zoom, movement speed, muzzle velocity, drag and penetration power. All of these values are in one data table: `src/shared/weapons.js`.
+
+## Gun physics
+
+**Real bullets, not instant hits.** Every round is simulated on the host (`src/shared/ballistics.js`, stepped 60 times a second):
+* **Muzzle velocity and travel time:**
+
+  | Gun | Muzzle velocity | Time to 100 m |
+  |---|---|---|
+  | Rifle | 790 m/s | about 0.13 s |
+  | Sniper | 900 m/s | about 0.11 s |
+  | Pistol | 370 m/s | about 0.28 s |
+
+  Moving targets at range need leading.
+* **Drag:** slow rounds (pistol, SMG, shotgun pellets) lose speed fastest.
+* **Gravity drop:** about 8 cm at 100 m for the rifle, 24 cm at 200 m for the sniper, and 40 cm at 100 m for the pistol. Long shots need holdover.
+* **Damage falloff:** damage falls off with the distance the bullet actually travelled.
+* **Lag compensation:** targets are checked where they were on the shooter's screen.
+
+**Wall penetration.** Each round has a penetration power. Each material has a resistance per centimetre, and hollow objects (crates, shipping containers) are thin shells.
+
+| Cover | Stops | Goes through |
+|---|---|---|
+| Wooden crate, 0.3 m plaster wall, shipping container | Pistol, SMG | Rifle, LMG, DMR, sniper |
+| 0.3 m brick wall | Pistol, SMG, rifle, LMG | DMR, sniper |
+| Metal railing | Everything except the sniper | Sniper |
+| Concrete barrier, sandbags, rock | Everything | Nothing |
+
+A round that goes through loses damage and speed. Exit holes appear on the far side.
+
+**Hit zones:**
+* Head: the weapon's headshot multiplier.
+* Torso: full damage.
+* Legs: 0.8×.
+
+**Recoil patterns.** Each gun has a learnable pattern:
+* the first shots stay tight
+* then the climb grows
+* the muzzle walks side to side in a gun-specific way, with a little randomness
+
+Aiming down sights and crouching tame it, and the view recovers when you stop firing.
+
+**Weapon sway.** Aiming down sights drifts in a slow figure-eight:
+* it is strongest on the sniper and DMR, and grows while moving
+* crouching reduces it
+* touch players get half the sway
+
+With a sniper or DMR on a computer, hold **Shift** to **hold your breath** and steady the scope for up to 4 seconds. After that you need to recover (the scope is shakier for 3 seconds). A meter under the scope shows your breath.
+
+**Reloads.** Reloading before the magazine is empty keeps a round in the chamber. For example, a rifle goes to 30 + 1 = 31 rounds. Empty reloads are slower. The shotgun and LMG don't chamber an extra round.
+
+**Feedback:**
+* Tracers fly at bullet speed.
+* Impacts appear when the bullet arrives:
+  * sparks off metal
+  * dust off concrete and brick
+  * splinters off wood
+  * puffs off sand and dirt
+* Enemy rounds passing close to your head make a supersonic **crack** (rifles, snipers) or a **whiz** (pistols, SMGs).
+
+**Bots use the same ballistics.** They lead moving targets and aim above for drop. Better bots do it more accurately.
 
 ## Bots
 
@@ -316,6 +376,7 @@ web/
    │  ├─ bots.js            # bot brain: perception, FSM, steering, aim
    │  ├─ modes.js           # TDM / DOM / FFA / Gun Game / Elimination / Horde
    │  ├─ difficulty.js      # continuous bot levels (blends Recruit..Apex presets)
+   │  ├─ ballistics.js      # bullet flight (velocity, drag, gravity), materials and penetration
    │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
    │  └─ host.js            # fixed-tick match host, client bindings, network messages

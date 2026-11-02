@@ -1,6 +1,7 @@
 // Authoritative game simulation. Runs in the host player's browser for online play and in your own tab for offline
 // play (same code path), so offline and online behave identically.
 import { BOT_NAMES, HISTORY_SECONDS, MAX_REWIND, PLAYER, TEAM, TEAM_NAMES, TICK_RATE } from './constants.js';
+import { BULLET_STEP, MATERIAL_IDS, accelerate, createBullet, exitDistance, penetrationCost } from './ballistics.js';
 import { botCosmetics, sanitizeCamo, sanitizeOutfit } from './cosmetics.js';
 import { sanitizeDifficulty } from './difficulty.js';
 import { BotBrain } from './bots.js';
@@ -65,6 +66,7 @@ export class Game {
     this.time = 0;
     this.tick = 0;
     this.events = [];          // broadcast events (flushed by the host every tick)
+    this.bullets = [];         // bullets in flight (see stepBullets)
     this.direct = new Map();   // entity id -> targeted events
     this.noises = [];
     this.noiseCounter = 0;
@@ -373,6 +375,7 @@ export class Game {
       this.record(e);
     }
 
+    this.stepBullets(dt);
     if (this.phase !== 'ended') this.mode.update(dt);
     if (this.phase === 'ended' && this.time >= this.phaseEnd) {
       this.restartPending = true;
@@ -425,79 +428,130 @@ export class Game {
   // ==============================================================================================
   // Combat
   // ==============================================================================================
+  /**
+   * A trigger pull: one real bullet per pellet. Bullets are simulated in stepBullets() with muzzle velocity, drag,
+   * gravity drop and wall penetration; hits are tested against targets rewound to what the shooter saw.
+   */
   resolveShot(shooter, shot) {
     const w = shot.weapon;
     shooter.lastFire = this.time;
-    if (this.phase === 'warmup' || this.phase === 'ended') {
-      // Shots are still visualised but deal no damage outside the live phase.
-    }
-
     const viewTime = shooter.isBot ? this.time : clamp(shooter.currentCmd ? shooter.currentCmd.vt : this.time, this.time - MAX_REWIND, this.time);
-    const pose = { x: 0, y: 0, z: 0, c: 0, alive: true };
-    const hb = {};
-    const candidates = [];
-    for (const o of this.entities.values()) {
-      if (o === shooter || !o.alive) continue;
-      if (!this.mode.isHostile(shooter, o)) continue; // bullets pass through teammates
-      this.poseAt(o, viewTime, pose);
-      if (!pose.alive) continue;
-      // Broad phase: within weapon range of the ray origin.
-      if (dist3(pose.x, pose.y + 1, pose.z, shot.ox, shot.oy, shot.oz) > w.range + 2) continue;
-      candidates.push({ e: o, x: pose.x, y: pose.y, z: pose.z, c: pose.c });
-    }
-
+    const offset = this.time - viewTime;
     const pellets = Math.max(1, w.pellets);
-    const damageBy = new Map();
-    const fxPoints = [];
     const dir = { x: 0, y: 0, z: 0 };
-    const n = { nx: 0, ny: 0, nz: 0 };
-    let headshot = false;
+    const dirs = [];
     for (let p = 0; p < pellets; p++) {
       spreadDirection(shot.dx, shot.dy, shot.dz, shot.spread, shot.seed, p, dir);
-      const wh = this.world.raycast(shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, w.range);
-      let bestT = wh ? wh.t : w.range;
-      let victim = null, head = false;
-      for (const c of candidates) {
-        hitboxesAt(c.x, c.y, c.z, c.c, hb);
-        const th = raySphere(shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, hb.hx, hb.hy, hb.hz, hb.hr);
-        if (th >= 0 && th < bestT) { bestT = th; victim = c.e; head = true; }
-        const tb = rayBox(shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, hb.minx, hb.miny, hb.minz, hb.maxx, hb.maxy, hb.maxz, bestT, n);
-        if (tb >= 0 && tb < bestT) { bestT = tb; victim = c.e; head = false; }
-      }
-      const px = shot.ox + dir.x * bestT, py = shot.oy + dir.y * bestT, pz = shot.oz + dir.z * bestT;
-      if (victim) {
-        const dmg = damageAt(w, bestT) * (head ? w.headMul : 1);
-        const prev = damageBy.get(victim) || { amount: 0, head: false };
-        prev.amount += dmg;
-        prev.head = prev.head || head;
-        damageBy.set(victim, prev);
-        headshot = headshot || head;
-        fxPoints.push([r2(px), r2(py), r2(pz), 0, 0, 0, 1]);
-      } else if (wh) {
-        fxPoints.push([r2(px), r2(py), r2(pz), wh.nx, wh.ny, wh.nz, 0]);
-      } else {
-        fxPoints.push([r2(px), r2(py), r2(pz), 0, 0, 0, 2]);
-      }
-
-      // Near misses suppress bots.
-      for (const o of this.entities.values()) {
-        if (!o.isBot || !o.alive || o === shooter || o === victim || !this.mode.isHostile(shooter, o)) continue;
-        const d = distToSegment(o.motor.x, o.motor.y + 1.2, o.motor.z, shot.ox, shot.oy, shot.oz, px, py, pz);
-        if (d < 3.5) o.brain.onIncomingFire(shooter, shot.ox, shot.oy, shot.oz, (1 - d / 3.5) / pellets);
-      }
+      const b = createBullet(shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, w);
+      b.shooter = shooter; b.weapon = w; b.offset = offset; b.suppressed = null; b.pellets = pellets;
+      this.bullets.push(b);
+      dirs.push([r3(dir.x), r3(dir.y), r3(dir.z)]);
     }
-
-    let total = 0, killed = false;
-    for (const [victim, info] of damageBy) {
-      const before = victim.hp;
-      this.damage(victim, info.amount, shooter, w.id, info.head, shot.ox, shot.oy, shot.oz);
-      total += before - Math.max(0, victim.hp);
-      if (before > 0 && !victim.alive) killed = true;
-    }
-
+    if (this.bullets.length > 600) this.bullets.splice(0, this.bullets.length - 600);
     this.noise(shot.ox, shot.oy, shot.oz, NOISE[w.id] || 70, 'gun', shooter);
-    this.event({ type: 'shot', s: shooter.id, w: w.id, o: [r2(shot.ox), r2(shot.oy), r2(shot.oz)], p: fxPoints }, shooter.isBot ? null : shooter.id);
-    if (total > 0 && !shooter.isBot) this.eventTo(shooter, { type: 'hit', d: Math.round(total), hs: headshot ? 1 : 0, k: killed ? 1 : 0 });
+    this.event({ type: 'shot', s: shooter.id, w: w.id, o: [r2(shot.ox), r2(shot.oy), r2(shot.oz)], d: dirs }, shooter.isBot ? null : shooter.id);
+  }
+
+  /** Moves every bullet two integration steps per tick and resolves hits, penetration and near misses. */
+  stepBullets(dt) {
+    if (!this.bullets.length) return;
+    const steps = Math.max(1, Math.round(dt / BULLET_STEP));
+    const h = dt / steps;
+    const pose = { x: 0, y: 0, z: 0, c: 0, alive: true };
+    const hb = {};
+    const n = { nx: 0, ny: 0, nz: 0 };
+    const impacts = [];
+    const hits = new Map(); // shooter -> { d, hs, k }
+    let live = 0;
+    for (let i = 0; i < this.bullets.length; i++) {
+      const b = this.bullets[i];
+      let dead = false;
+      for (let s = 0; s < steps && !dead; s++) {
+        accelerate(b, h);
+        const speed = Math.hypot(b.vx, b.vy, b.vz);
+        if (speed < 30 || b.dist > b.weapon.range * 1.5 || b.age > 3 || b.y < -5) { dead = true; break; }
+        const len = speed * h;
+        const ux = b.vx / speed, uy = b.vy / speed, uz = b.vz / speed;
+        const wh = this.world.raycast(b.x, b.y, b.z, ux, uy, uz, len);
+        let bestT = wh ? wh.t : len;
+        let victim = null, head = false, hitY = 0, victimY = 0, victimC = 0;
+        // Targets, rewound to the moment the shooter was seeing (lag compensation).
+        const t = this.time - b.offset;
+        for (const o of this.entities.values()) {
+          if (o === b.shooter || !o.alive || !this.mode.isHostile(b.shooter, o)) continue;
+          if (Math.abs(o.motor.x - b.x) > len + 3 || Math.abs(o.motor.z - b.z) > len + 3) continue;
+          this.poseAt(o, t, pose);
+          if (!pose.alive) continue;
+          hitboxesAt(pose.x, pose.y, pose.z, pose.c, hb);
+          const th = raySphere(b.x, b.y, b.z, ux, uy, uz, hb.hx, hb.hy, hb.hz, hb.hr);
+          if (th >= 0 && th < bestT) { bestT = th; victim = o; head = true; victimY = pose.y; victimC = pose.c; }
+          const tb = rayBox(b.x, b.y, b.z, ux, uy, uz, hb.minx, hb.miny, hb.minz, hb.maxx, hb.maxy, hb.maxz, bestT, n);
+          if (tb >= 0 && tb < bestT) { bestT = tb; victim = o; head = false; victimY = pose.y; victimC = pose.c; }
+        }
+        const px = b.x + ux * bestT, py = b.y + uy * bestT, pz = b.z + uz * bestT;
+        // Near misses suppress bots (once per bullet per bot).
+        for (const o of this.entities.values()) {
+          if (!o.isBot || !o.alive || o === b.shooter || o === victim || !this.mode.isHostile(b.shooter, o)) continue;
+          if (b.suppressed && b.suppressed.has(o.id)) continue;
+          const d = distToSegment(o.motor.x, o.motor.y + 1.2, o.motor.z, b.x, b.y, b.z, px, py, pz);
+          if (d < 3.5) {
+            o.brain.onIncomingFire(b.shooter, b.x, b.y, b.z, (1 - d / 3.5) / b.pellets);
+            (b.suppressed || (b.suppressed = new Set())).add(o.id);
+          }
+        }
+        if (victim) {
+          hitY = py;
+          // Hit zones: head (weapon multiplier), legs (0.8x), torso (1x). Damage falls off with distance travelled.
+          const legTop = victimY + (victimC > 0.5 ? 0.55 : 0.85);
+          const zone = head ? b.weapon.headMul : hitY < legTop ? 0.8 : 1;
+          const amount = damageAt(b.weapon, b.dist + bestT) * zone * b.dmgMul;
+          const before = victim.hp;
+          this.damage(victim, amount, b.shooter, b.weapon.id, head, b.shooter.motor.x, b.shooter.motor.y + 1.5, b.shooter.motor.z);
+          if (!b.shooter.isBot) {
+            const agg = hits.get(b.shooter) || { d: 0, hs: false, k: false };
+            agg.d += before - Math.max(0, victim.hp);
+            agg.hs = agg.hs || head;
+            agg.k = agg.k || (before > 0 && !victim.alive);
+            hits.set(b.shooter, agg);
+          }
+          impacts.push([b.shooter.id, r2(px), r2(py), r2(pz), 0, 0, 0, 1, 0]);
+          dead = true;
+          break;
+        }
+        if (wh) {
+          const mat = wh.box ? MATERIAL_IDS.indexOf(wh.box.m) : -1;
+          impacts.push([b.shooter.id, r2(px), r2(py), r2(pz), wh.nx, wh.ny, wh.nz, 0, mat]);
+          if (wh.box) {
+            // Penetration: thin or soft cover lets the round through with less energy.
+            const thick = exitDistance(px + ux * 0.001, py + uy * 0.001, pz + uz * 0.001, ux, uy, uz, wh.box);
+            const cost = penetrationCost(wh.box, thick);
+            if (cost < b.power) {
+              b.power -= cost;
+              b.dmgMul *= Math.max(0.2, 1 - cost / b.power0);
+              const ex = px + ux * (thick + 0.01), ey = py + uy * (thick + 0.01), ez = pz + uz * (thick + 0.01);
+              impacts.push([b.shooter.id, r2(ex), r2(ey), r2(ez), -wh.nx, -wh.ny, -wh.nz, 3, mat]);
+              const slow = Math.max(0.3, 1 - cost / b.power0);
+              b.vx *= slow; b.vy *= slow; b.vz *= slow;
+              b.x = ex; b.y = ey; b.z = ez;
+              b.dist += bestT + thick;
+              b.age += h;
+              continue;
+            }
+          }
+          dead = true;
+          break;
+        }
+        b.x = px; b.y = py; b.z = pz;
+        b.dist += len;
+        b.age += h;
+      }
+      if (!dead) this.bullets[live++] = b;
+    }
+    this.bullets.length = live;
+    if (impacts.length) this.event({ type: 'imp', l: impacts });
+    for (const [shooter, agg] of hits) {
+      if (agg.d > 0) this.eventTo(shooter, { type: 'hit', d: Math.round(agg.d), hs: agg.hs ? 1 : 0, k: agg.k ? 1 : 0 });
+    }
   }
 
   damage(victim, amount, attacker, weaponId, headshot, ox, oy, oz) {

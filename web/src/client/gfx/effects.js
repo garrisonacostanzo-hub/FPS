@@ -73,7 +73,7 @@ export class Effects {
     }
   }
 
-  tracer(from, to, color) {
+  tracer(from, to, color, durationMs) {
     let t = this.tracers.find((x) => !x.mesh.visible);
     if (!t) {
       if (this.tracers.length >= 60) t = this.tracers[0];
@@ -97,7 +97,7 @@ export class Effects {
     t.mesh.material.color.set(color || 0xffd27a).multiplyScalar(3);
     t.mesh.visible = true;
     t.start = performance.now();
-    t.until = t.start + Math.max(40, (len / 450) * 1000);
+    t.until = t.start + Math.max(40, durationMs ?? (len / 450) * 1000);
     this.placeTracer(t, 0);
   }
 
@@ -106,7 +106,13 @@ export class Effects {
     t.mesh.position.copy(t.from).addScaledVector(t.dir, d);
   }
 
-  impact(point, character) {
+  /** Impact after `delayMs` (when the bullet actually arrives). */
+  impactAt(point, character, material, delayMs) {
+    if (!delayMs || delayMs < 8) { this.impact(point, character, material); return; }
+    (this.pending || (this.pending = [])).push({ at: performance.now() + delayMs, point, character, material });
+  }
+
+  impact(point, character, material = null) {
     const [x, y, z, nx = 0, ny = 1, nz = 0] = point;
     if (!character) {
       // Bullet hole.
@@ -123,8 +129,22 @@ export class Effects {
       d.lookAt(d.position.x + n.x, d.position.y + n.y, d.position.z + n.z);
       d.rotation.z = Math.random() * 6;
       d.scale.setScalar(0.7 + Math.random() * 0.6);
-      this.puff(x, y, z, 0x9a8f80, 0.25, 0.55, 420);
-      this.spawnSparks(x, y, z, nx, ny, nz, 7, 1, 0.75, 0.35);
+      // Material response: metal sparks, masonry dust, wood splinters, sand and dirt.
+      const m = material || 'ground';
+      if (m === 'metal' || m === 'container' || m === 'containerB' || m === 'stairs' || m === 'boundary') {
+        this.spawnSparks(x, y, z, nx, ny, nz, 14, 1, 0.8, 0.4);
+        this.puff(x, y, z, 0x6a6a6a, 0.12, 0.35, 220);
+      } else if (m === 'crate' || m === 'floor') {
+        this.puff(x, y, z, 0x8a6a43, 0.22, 0.6, 450);
+        this.spawnSparks(x, y, z, nx, ny, nz, 5, 0.55, 0.38, 0.2);
+      } else if (m === 'sand') {
+        this.puff(x, y, z, 0xc2a173, 0.4, 0.7, 700);
+      } else if (m === 'ground') {
+        this.puff(x, y, z, 0x6b5a44, 0.35, 0.65, 600);
+      } else {
+        this.puff(x, y, z, 0xa89c8c, 0.3, 0.6, 520);
+        this.spawnSparks(x, y, z, nx, ny, nz, 4, 1, 0.75, 0.35);
+      }
     } else {
       this.puff(x, y, z, 0x8a1010, 0.18, 0.4, 240);
       this.spawnSparks(x, y, z, 0, 1, 0, 4, 1, 0.25, 0.2);
@@ -187,6 +207,12 @@ export class Effects {
 
   update(dt) {
     const now = performance.now();
+    if (this.pending && this.pending.length) {
+      for (let i = this.pending.length - 1; i >= 0; i--) {
+        const p = this.pending[i];
+        if (now >= p.at) { this.impact(p.point, p.character, p.material); this.pending.splice(i, 1); }
+      }
+    }
     for (const t of this.tracers) {
       if (!t.mesh.visible) continue;
       if (now > t.until) { t.mesh.visible = false; continue; }

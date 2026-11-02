@@ -13,12 +13,16 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { GameRenderer } from './renderer.js';
 import { onSettingsChanged, saveSettings, settings } from './settings.js';
+import { MATERIAL_IDS, tracePath } from '../shared/ballistics.js';
 import { difficultyLevel } from '../shared/difficulty.js';
 import { profile, recordMatch } from './profile.js';
 import { TeamPalette } from './teamcolors.js';
 import { TouchControls, enterMobileFullscreen, touchControlsWanted } from './touch.js';
 
 const CMD_DT = 1 / 60;
+// Aim sway amplitude (radians) while fully aimed; horizontal recoil drift phase per weapon.
+const SWAY = { sniper: 0.0075, dmr: 0.0045, rifle: 0.0022, lmg: 0.003, smg: 0.0018, pistol: 0.0025, shotgun: 0.0015 };
+const RECOIL_BIAS = { pistol: 0.4, smg: 1.9, rifle: 0.9, shotgun: 0, lmg: 2.6, dmr: 1.3, sniper: 0.2 };
 const TOUCH_LOOK = 0.0058;          // radians per CSS pixel of finger drag at sensitivity 1
 const ASSIST_CONE = 4.5 * Math.PI / 180;
 
@@ -58,6 +62,7 @@ export class ClientSession {
     this.damageFx = 0;
     this.losCache = new Map();
     this.crosshairAlly = null;
+    this.sway = { t: 0, yaw: 0, pitch: 0, breath: 1, holding: false, recover: 0 };
     this.hud = new Hud(hudRoot, {
       palette: this.palette,
       map: this.map,
@@ -262,15 +267,27 @@ export class ClientSession {
         const muzzle = this.renderer.characterMuzzle(ev.s, this.tmpV) || this.tmpV.set(origin.x, origin.y, origin.z);
         const from = { x: muzzle.x, y: muzzle.y, z: muzzle.z };
         const w = WEAPONS[ev.w] || WEAPONS.rifle;
-        ev.p.forEach((p, i) => {
-          const shooter = this.roster.get(ev.s);
-          if (ev.p.length === 1 || i % 2 === 0) this.renderer.tracer(from, p, this.palette.tracer(ev.s, shooter ? shooter.team : TEAM.NONE));
-          if (p[6] !== 2) this.renderer.impact(p, p[6] === 1);
+        const shooter = this.roster.get(ev.s);
+        const hostile = !this.palette.isAlly(ev.s, shooter ? shooter.team : TEAM.NONE);
+        const color = this.palette.tracer(ev.s, shooter ? shooter.team : TEAM.NONE);
+        const dirs = ev.d || [];
+        let whizzed = false;
+        dirs.forEach((d, i) => {
+          const path = tracePath(this.world, origin.x, origin.y, origin.z, d[0], d[1], d[2], w);
+          if (dirs.length === 1 || i % 2 === 0) this.renderer.tracer(from, [path.x, path.y, path.z], color, path.time * 1000);
+          if (!whizzed && hostile && this.actor.alive) whizzed = this.nearMiss(origin, path, w);
         });
         this.renderer.muzzleLight(this.tmpV.set(from.x, from.y, from.z));
         this.audio.gunshot(w.id, origin, false);
         return;
       }
+      case 'imp':
+        // Server-confirmed bullet impacts (entry, exit after penetration, body hits) with the surface material.
+        for (const [sid, x, y, z, nx, ny, nz, kind, mat] of ev.l) {
+          if (sid === this.myId && kind === 0) continue; // already shown by our own prediction
+          this.renderer.impact([x, y, z, nx, ny, nz], kind === 1, mat >= 0 ? MATERIAL_IDS[mat] : 'ground');
+        }
+        return;
       case 'hit':
         this.hud.hitmarker(ev.hs === 1, ev.k === 1);
         if (ev.k) this.audio.kill(); else this.audio.hit(ev.hs === 1);
@@ -455,6 +472,7 @@ export class ClientSession {
       this.crosshairAlly,
     );
     this.updateLook(dt);
+    this.updateSway(dt);
     this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed() });
     if (!this.paused && this.input.consume('chat')) {
       this.input.releaseLock();
@@ -551,8 +569,8 @@ export class ClientSession {
       dt: CMD_DT,
       mx: active ? input.moveX : 0,
       mz: active ? input.moveZ : 0,
-      yaw: this.viewYaw + this.recoilYaw,
-      pitch: clamp(this.viewPitch + this.recoilPitch, -1.5, 1.5),
+      yaw: this.viewYaw + this.recoilYaw + this.sway.yaw,
+      pitch: clamp(this.viewPitch + this.recoilPitch + this.sway.pitch, -1.5, 1.5),
       b: active ? input.buildButtons() : 0,
       sw,
       r: active ? input.consume('reload') : false,
@@ -659,14 +677,22 @@ export class ClientSession {
 
   onLocalShot(actor, shot) {
     const w = shot.weapon;
-    // Recoil (view punch carried into following commands).
-    const aimMul = lerp(1, 0.65, actor.aim01);
-    const kick = (w.recoil[0] + Math.random() * (w.recoil[1] - w.recoil[0])) * DEG * aimMul;
-    this.recoilPitch += kick * 0.35;
-    this.viewPitch = clamp(this.viewPitch + kick * 0.65, -1.5, 1.5);
-    const h = (Math.random() * 2 - 1) * w.recoilH * DEG * aimMul;
-    this.recoilYaw += h * 0.4;
-    this.viewYaw += h * 0.6;
+    // Recoil: a learnable per-weapon pattern (the first shots stay close, then the climb grows and the gun walks
+    // side to side), with a little randomness. Aiming down sights and crouching tame it.
+    const now = performance.now();
+    this.shotIndex = now - (this.lastShotAt || 0) > 320 ? 0 : (this.shotIndex || 0) + 1;
+    this.lastShotAt = now;
+    const n = this.shotIndex;
+    const control = lerp(1, 0.62, actor.aim01) * (actor.motor.crouching ? 0.82 : 1);
+    const climb = 1 + Math.min(n, 10) * 0.045;
+    const vertical = lerp(w.recoil[0], w.recoil[1], 0.5 + 0.5 * Math.sin(n * 1.7 + 0.3)) * DEG * control * climb;
+    const bias = RECOIL_BIAS[w.id] || 0;
+    const pattern = n < 3 ? 0.15 * Math.sin(n * 2.1 + bias) : Math.sin(n * 0.55 + bias) * (n < 8 ? 0.75 : 1);
+    const horizontal = (pattern + (Math.random() * 2 - 1) * 0.22) * w.recoilH * 1.5 * DEG * control;
+    this.recoilPitch += vertical * 0.35;
+    this.viewPitch = clamp(this.viewPitch + vertical * 0.65, -1.5, 1.5);
+    this.recoilYaw += horizontal * 0.4;
+    this.viewYaw += horizontal * 0.6;
 
     this.renderer.viewModelFire();
     this.audio.gunshot(w.id, null, true);
@@ -674,29 +700,82 @@ export class ClientSession {
     const muzzle = this.renderer.muzzleWorldPosition(new THREE.Vector3());
     this.renderer.muzzleLight(muzzle);
 
-    // Cosmetic predicted hits against what this client sees.
+    // Predicted bullets with the same ballistics as the server: the tracer flies at bullet speed and the impact
+    // appears when the round arrives. Hits on players are confirmed by the server ('imp' + 'hit').
     const dir = { x: 0, y: 0, z: 0 };
     const hb = {};
-    const pellets = Math.max(1, w.pellets);
-    for (let p = 0; p < pellets; p++) {
-      spreadDirection(shot.dx, shot.dy, shot.dz, shot.spread, shot.seed, p, dir);
-      const wh = this.world.raycast(shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, w.range);
-      let best = wh ? wh.t : w.range;
-      let char = false;
+    const hitTest = (ox, oy, oz, dx, dy, dz, maxT) => {
+      let best = -1;
       for (const [id, pose] of this.renderPoses) {
         if (!pose.alive || id === this.myId) continue;
         const r = this.roster.get(id);
         if (this.teams && r && r.team === this.myTeam) continue;
         hitboxesAt(pose.x, pose.y, pose.z, pose.crouch, hb);
-        const th = raySphere(shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, hb.hx, hb.hy, hb.hz, hb.hr);
-        if (th >= 0 && th < best) { best = th; char = true; }
-        const tb = rayBox(shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, hb.minx, hb.miny, hb.minz, hb.maxx, hb.maxy, hb.maxz, best, null);
-        if (tb >= 0 && tb < best) { best = tb; char = true; }
+        const th = raySphere(ox, oy, oz, dx, dy, dz, hb.hx, hb.hy, hb.hz, hb.hr);
+        if (th >= 0 && th <= maxT && (best < 0 || th < best)) best = th;
+        const tb = rayBox(ox, oy, oz, dx, dy, dz, hb.minx, hb.miny, hb.minz, hb.maxx, hb.maxy, hb.maxz, maxT, null);
+        if (tb >= 0 && (best < 0 || tb < best)) best = tb;
       }
-      const point = [shot.ox + dir.x * best, shot.oy + dir.y * best, shot.oz + dir.z * best, wh ? wh.nx : 0, wh ? wh.ny : 1, wh ? wh.nz : 0];
-      if (pellets === 1 || p % 2 === 0) this.renderer.tracer(muzzle, point, 0xfff0b0);
-      if (char || wh) this.renderer.impact(point, char);
+      return best;
+    };
+    const pellets = Math.max(1, w.pellets);
+    for (let p = 0; p < pellets; p++) {
+      spreadDirection(shot.dx, shot.dy, shot.dz, shot.spread, shot.seed, p, dir);
+      const path = tracePath(this.world, shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, w, hitTest);
+      const point = [path.x, path.y, path.z, path.nx, path.ny, path.nz];
+      if (pellets === 1 || p % 2 === 0) this.renderer.tracer(muzzle, point, 0xfff0b0, path.time * 1000);
+      if (path.kind === 'world') this.renderer.impact(point, false, path.box ? path.box.m : 'ground', path.time * 1000);
     }
+  }
+
+  /** Crack / whiz when an enemy round passes close to the camera (once per shot). */
+  nearMiss(origin, path, weapon) {
+    const cam = this.renderer.camera.position;
+    const ex = path.x - origin.x, ey = path.y - origin.y, ez = path.z - origin.z;
+    const len2 = ex * ex + ey * ey + ez * ez;
+    if (len2 < 1) return false;
+    const k = ((cam.x - origin.x) * ex + (cam.y - origin.y) * ey + (cam.z - origin.z) * ez) / len2;
+    if (k < 0.05 || k > 0.98) return false;
+    const px = origin.x + ex * k, py = origin.y + ey * k, pz = origin.z + ez * k;
+    const d = Math.hypot(cam.x - px, cam.y - py, cam.z - pz);
+    if (d > 2.6) return false;
+    const delay = path.time * k * 1000;
+    setTimeout(() => this.running && this.audio.nearMiss({ x: px, y: py, z: pz }, weapon.muzzleVel > 343), delay);
+    return true;
+  }
+
+  // ==============================================================================================
+  // Weapon sway (aiming down sights) and holding breath
+  // ==============================================================================================
+  updateSway(dt) {
+    const sw = this.sway;
+    const w = activeWeapon(this.actor.ws);
+    const m = this.actor.motor;
+    const ads = this.actor.aim01;
+    const scoped = w.id === 'sniper' || w.id === 'dmr';
+    const canHold = scoped && ads > 0.6 && !this.touchUI.enabled;
+    const wantHold = canHold && this.input.sprint && !this.paused;
+    // Breath: up to 4 s of steady aim, then the shooter must recover (shakier) before holding again.
+    if (wantHold && sw.breath > 0 && sw.recover <= 0) {
+      sw.holding = true;
+      sw.breath = Math.max(0, sw.breath - dt / 4);
+      if (sw.breath === 0) sw.recover = 3;
+    } else {
+      sw.holding = false;
+      if (sw.recover > 0) sw.recover -= dt;
+      sw.breath = Math.min(1, sw.breath + dt / 5);
+    }
+    const base = SWAY[w.id] || 0.003;
+    const speed = Math.hypot(m.vx, m.vz);
+    const stance = m.crouching ? 0.55 : 1;
+    const moving = 1 + Math.min(1.5, speed / 3);
+    const breath = sw.holding ? 0.1 : sw.recover > 0 ? 2.2 : 1;
+    const touch = this.touchUI.enabled ? 0.5 : 1; // touch players can't hold breath; aim assist covers the rest
+    const amp = base * ads * stance * moving * breath * touch * (this.actor.alive ? 1 : 0);
+    sw.t += dt * (sw.recover > 0 ? 1.7 : 1);
+    sw.yaw += (amp * Math.sin(sw.t * 0.9) - sw.yaw) * Math.min(1, dt * 6);
+    sw.pitch += (amp * 0.6 * Math.sin(sw.t * 1.8 + 0.5) - sw.pitch) * Math.min(1, dt * 6);
+    this.hud.setBreath(scoped && ads > 0.6 && !this.touchUI.enabled ? { breath: sw.breath, holding: sw.holding, recovering: sw.recover > 0 } : null);
   }
 
   // ==============================================================================================
@@ -773,7 +852,7 @@ export class ClientSession {
     if (this.actor.alive) {
       const bob = m.grounded && settings.cameraBob ? Math.sin(t * 0.012 * (1 + speed * 0.15)) * Math.min(1, speed / 7) * 0.03 * (1 - this.actor.aim01 * 0.85) : 0;
       cam.position.set(px, py + eyeHeightOf(m) + Math.abs(bob), pz);
-      cam.rotation.set(clamp(this.viewPitch + this.recoilPitch, -1.5, 1.5) + shakeY, this.viewYaw + this.recoilYaw + shakeX, 0);
+      cam.rotation.set(clamp(this.viewPitch + this.recoilPitch + this.sway.pitch, -1.5, 1.5) + shakeY, this.viewYaw + this.recoilYaw + this.sway.yaw + shakeX, 0);
     } else {
       // Death cam: orbit above the body, looking at the killer if visible.
       this.deathCam = Math.min(1, this.deathCam + dt * 1.5);
