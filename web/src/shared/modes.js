@@ -295,8 +295,11 @@ class Elimination extends BaseMode {
   hud() {
     const game = this.game;
     return {
-      s: this.wins, lim: this.scoreLimit,
-      rd: [this.round, this.roundState === 'live' ? Math.max(0, this.roundEnd - game.time) : Math.max(0, this.nextRoundAt - game.time), game.aliveCount(TEAM.A), game.aliveCount(TEAM.B), this.roundState === 'live' ? 1 : 0],
+      s: this.wins || [0, 0], lim: this.scoreLimit,
+      // Before the first round (warmup) there is no round state yet.
+      rd: this.round
+        ? [this.round, this.roundState === 'live' ? Math.max(0, this.roundEnd - game.time) : Math.max(0, (this.nextRoundAt || game.time) - game.time), game.aliveCount(TEAM.A), game.aliveCount(TEAM.B), this.roundState === 'live' ? 1 : 0]
+        : [1, this.roundTime, game.aliveCount(TEAM.A), game.aliveCount(TEAM.B), 0],
     };
   }
 }

@@ -189,6 +189,52 @@ function nameSprite(text, color) {
   return sprite;
 }
 
+// Outline: a slightly larger copy of each body part, drawn inside-out in a flat team colour (not fogged), so
+// players stand out from the scenery at any distance and in the dark.
+const outlineCache = new Map();
+function outlineMaterial(color) {
+  if (!outlineCache.has(color)) outlineCache.set(color, new THREE.MeshBasicMaterial({ color, side: THREE.BackSide, fog: false }));
+  return outlineCache.get(color);
+}
+function addOutline(mesh, color, thickness = 0.045) {
+  const o = new THREE.Mesh(mesh.geometry, outlineMaterial(color));
+  const s = mesh.scale;
+  o.scale.set(1 + (2 * thickness) / s.x, 1 + (2 * thickness) / s.y, 1 + (2 * thickness) / s.z);
+  o.castShadow = false;
+  mesh.add(o);
+  return o;
+}
+
+// Marker over a player's head: a chevron that keeps the same size on screen at any distance.
+const markerCache = new Map();
+function markerSprite(color, throughWalls) {
+  const key = color + throughWalls;
+  if (!markerCache.has(key)) {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const g = c.getContext('2d');
+    g.beginPath();
+    g.moveTo(10, 14); g.lineTo(54, 14); g.lineTo(32, 50); g.closePath();
+    g.lineJoin = 'round';
+    g.lineWidth = 7;
+    g.strokeStyle = 'rgba(0,0,0,0.85)';
+    g.stroke();
+    g.fillStyle = color;
+    g.fill();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    markerCache.set(key, new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: !throughWalls, depthWrite: false, sizeAttenuation: false, fog: false }));
+  }
+  const sprite = new THREE.Sprite(markerCache.get(key));
+  sprite.scale.set(0.045, 0.045, 1);
+  sprite.renderOrder = 11;
+  return sprite;
+}
+
+function shade(color, k) {
+  return '#' + new THREE.Color(color).multiplyScalar(k).getHexString();
+}
+
 class CharacterModel {
   constructor(scene, info) {
     this.root = new THREE.Group();
@@ -196,22 +242,33 @@ class CharacterModel {
     this.root.add(this.body);
     scene.add(this.root);
     this.info = info;
-    const teamColor = TEAM_COLORS[info.team] || TEAM_COLORS[2];
-    const dark = mat('#2a2d33'), skin = mat('#3a3f47'), team = mat(teamColor);
-    this.legL = part(boxGeo, dark, 0.18, 0.85, 0.22, -0.11, 0.43, 0, this.body);
-    this.legR = part(boxGeo, dark, 0.18, 0.85, 0.22, 0.11, 0.43, 0, this.body);
+    // The whole body carries the team colour (slightly glowing so it reads in shade and at night).
+    const teamColor = info.color || TEAM_COLORS[info.team] || TEAM_COLORS[2];
+    const team = mat(teamColor, 0.4), teamDark = mat(shade(teamColor, 0.5), 0.25);
+    const dark = mat('#23262b'), skin = mat('#3a3f47');
+    const parts = [];
+    this.legL = part(boxGeo, teamDark, 0.18, 0.85, 0.22, -0.11, 0.43, 0, this.body);
+    this.legR = part(boxGeo, teamDark, 0.18, 0.85, 0.22, 0.11, 0.43, 0, this.body);
     this.torso = part(boxGeo, team, 0.5, 0.62, 0.28, 0, 1.15, 0, this.body);
-    part(boxGeo, dark, 0.38, 0.4, 0.14, 0, 1.18, 0.2, this.body);
+    parts.push(this.legL, this.legR, this.torso);
+    part(boxGeo, dark, 0.38, 0.4, 0.14, 0, 1.18, 0.2, this.body);           // backpack
+    part(boxGeo, dark, 0.52, 0.1, 0.3, 0, 0.86, 0, this.body);              // belt
     this.headPivot = new THREE.Group();
     this.headPivot.position.set(0, 1.5, 0);
     this.body.add(this.headPivot);
-    part(sphereGeo, skin, 0.3, 0.32, 0.3, 0, 0.14, 0, this.headPivot);
-    part(boxGeo, mat('#ffd36b', 0.6), 0.22, 0.06, 0.05, 0, 0.17, -0.14, this.headPivot);
+    parts.push(part(sphereGeo, skin, 0.3, 0.32, 0.3, 0, 0.14, 0, this.headPivot));
+    parts.push(part(boxGeo, team, 0.34, 0.14, 0.36, 0, 0.28, 0.01, this.headPivot)); // helmet
+    part(boxGeo, mat(info.ally ? '#cfe8ff' : '#ffd36b', 0.7), 0.22, 0.06, 0.05, 0, 0.17, -0.14, this.headPivot);
     this.armPivot = new THREE.Group();
     this.armPivot.position.set(0, 1.35, 0);
     this.body.add(this.armPivot);
-    part(boxGeo, team, 0.12, 0.12, 0.5, 0.24, -0.05, -0.2, this.armPivot);
-    part(boxGeo, team, 0.12, 0.12, 0.45, -0.18, -0.08, -0.25, this.armPivot);
+    parts.push(part(boxGeo, team, 0.12, 0.12, 0.5, 0.24, -0.05, -0.2, this.armPivot));
+    parts.push(part(boxGeo, team, 0.12, 0.12, 0.45, -0.18, -0.08, -0.25, this.armPivot));
+    if (info.outline) for (const p of parts) addOutline(p, teamColor);
+    this.marker = markerSprite(teamColor, !!info.ally);
+    this.marker.position.set(0, info.ally ? 2.55 : 2.25, 0);
+    this.marker.visible = false;
+    this.root.add(this.marker);
     this.gunSocket = new THREE.Group();
     this.gunSocket.position.set(0.12, -0.02, -0.4);
     this.armPivot.add(this.gunSocket);
@@ -262,6 +319,10 @@ class CharacterModel {
     this.body.position.y = this.deathBlend * 0.15;
     if (this.label) this.label.visible = p.alive;
     return speed;
+  }
+
+  setMarker(visible) {
+    this.marker.visible = visible;
   }
 
   flash() {
@@ -433,8 +494,9 @@ export class GameRenderer {
     for (const [id, owner, progress, contested] of zoneStates) {
       const v = this.zoneVisuals.find((z) => z.id === id);
       if (!v) continue;
-      const ownerColor = new THREE.Color(TEAM_COLORS[owner] || TEAM_COLORS[2]);
-      const capColor = new THREE.Color(progress < 0 ? TEAM_COLORS[0] : TEAM_COLORS[1]);
+      const teamColor = this.teamColor || ((t) => TEAM_COLORS[t] || TEAM_COLORS[2]);
+      const ownerColor = new THREE.Color(owner === TEAM.NONE ? TEAM_COLORS[2] : teamColor(owner));
+      const capColor = new THREE.Color(teamColor(progress < 0 ? TEAM.A : TEAM.B));
       const color = owner === TEAM.NONE ? ownerColor.clone().lerp(capColor, Math.abs(progress)) : ownerColor;
       if (contested) color.lerp(new THREE.Color(0xffffff), (Math.sin(time * 8) + 1) * 0.25);
       v.ringMat.color.copy(color);
@@ -448,14 +510,17 @@ export class GameRenderer {
   // ------------------------------------------------------------------------------------------------
   // Characters
   // ------------------------------------------------------------------------------------------------
-  syncCharacter(id, info, pose, dt, labelText, labelColor) {
+  syncCharacter(id, info, pose, dt, labelText, labelColor, markerVisible = false) {
     let c = this.characters.get(id);
-    if (!c || c.info.team !== info.team) {
+    const look = info.color + (info.outline ? 'o' : '') + (info.ally ? 'a' : 'e');
+    if (!c || c.info.team !== info.team || c.look !== look) {
       if (c) c.dispose(this.scene);
       c = new CharacterModel(this.scene, info);
+      c.look = look;
       this.characters.set(id, c);
       c.labelKey = null;
     }
+    c.setMarker(markerVisible && pose.alive);
     const key = (labelText || '') + labelColor;
     if (c.labelKey !== key) { c.setLabel(labelText, labelColor); c.labelKey = key; }
     c.setWeapon(pose.weapon);

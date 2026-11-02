@@ -26,6 +26,18 @@ export const SETTINGS_SECTIONS = [
     ],
   },
   {
+    id: 'teams',
+    title: 'Teams & visibility',
+    items: [
+      { k: 'teamColors', label: 'Team colours', type: 'select', options: [['standard', 'Blue vs red'], ['colorblind', 'Blue vs yellow'], ['classic', 'Classic']],
+        hint: 'Your team is always blue and enemies red (or yellow, easier with red–green colour blindness). Classic: Alpha blue, Bravo orange.' },
+      { k: 'outlines', label: 'Coloured outlines around players', type: 'check' },
+      { k: 'enemyMarkers', label: 'Arrows over enemies you can see', type: 'check' },
+      { k: 'allyMarkers', label: 'Teammate names and arrows (shown through walls)', type: 'check' },
+      { k: 'crosshairTargetColor', label: 'Crosshair turns red on enemies and blue on teammates', type: 'check' },
+    ],
+  },
+  {
     id: 'mouse',
     title: 'Mouse & keyboard',
     items: [

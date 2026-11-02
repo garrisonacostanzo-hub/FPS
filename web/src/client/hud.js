@@ -1,6 +1,6 @@
 // DOM-based HUD: vitals, ammo, dynamic crosshair, hit markers, damage direction, kill feed, objectives per mode,
 // minimap, scoreboard, death / end screens, pause & settings menu and chat.
-import { TEAM, TEAM_COLORS, TEAM_NAMES } from '../shared/constants.js';
+import { TEAM, TEAM_NAMES } from '../shared/constants.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { saveSettings, settings } from './settings.js';
@@ -10,13 +10,15 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class Hud {
-  constructor(root, { map, modeId, online, isHost, roomCode, onLeave, onResume, onPlayAgain, onChat, onLoadout }) {
+  constructor(root, { map, modeId, online, isHost, roomCode, palette, onLeave, onResume, onPlayAgain, onChat, onLoadout }) {
     this.root = root;
     this.map = map;
     this.modeId = modeId;
     this.mode = MODE_LIST.find((m) => m.id === modeId) || MODE_LIST[0];
     this.online = online;
     this.isHost = !!isHost;
+    this.palette = palette;
+    this.crossTarget = null;
     this.roomCode = roomCode || '';
     this.callbacks = { onLeave, onResume, onPlayAgain, onChat, onLoadout };
     this.root.innerHTML = TEMPLATE;
@@ -31,6 +33,7 @@ export class Hud {
       board: $('#scoreboard', root), end: $('#endscreen', root), pause: $('#pause', root),
       minimap: $('#minimap', root), stats: $('#netstats', root), chat: $('#chat-log', root), chatInput: $('#chat-input', root),
       protect: $('#protect', root), area: $('#area', root), streak: $('#streak', root),
+      allyTag: $('#ally-tag', root), teamBadge: $('#team-badge', root), vitals: $('#vitals', root),
     };
     this.feed = [];
     this.hitTimer = null;
@@ -105,7 +108,8 @@ export class Hud {
     const perWeapon = w ? (w.id === 'shotgun' ? 'circle' : w.id === 'sniper' ? 'dot' : w.id === 'smg' ? 'dotcross' : 'cross') : 'cross';
     const style = settings.crosshairStyle && settings.crosshairStyle !== 'auto' ? settings.crosshairStyle : perWeapon;
     this.el.cross.dataset.style = style;
-    this.el.cross.style.setProperty('--xh-color', settings.crosshairColor);
+    const targetColor = this.crossTarget === 'enemy' ? this.palette.colors.enemy : this.crossTarget === 'ally' ? this.palette.colors.ally : null;
+    this.el.cross.style.setProperty('--xh-color', targetColor || settings.crosshairColor);
     this.el.cross.style.setProperty('--xh-scale', settings.crosshairSize);
   }
 
@@ -142,12 +146,12 @@ export class Hud {
   // ------------------------------------------------------------------------------------------------
   // Feed & announcements
   // ------------------------------------------------------------------------------------------------
-  killfeed(killer, victim, weaponId, headshot, killerTeam, victimTeam, highlight) {
+  killfeed(killer, victim, weaponId, headshot, killerColor, victimColor, highlight) {
     const w = WEAPONS[weaponId];
     const row = document.createElement('div');
     row.className = 'feed-row' + (highlight ? ' me' : '');
-    const kname = killer ? `<b style="color:${TEAM_COLORS[killerTeam]}">${esc(killer)}</b> ` : '';
-    row.innerHTML = `${kname}<span class="weap">[${esc(w ? w.name : 'world')}]${headshot ? ' <span class="hs">HS</span>' : ''}</span> <b style="color:${TEAM_COLORS[victimTeam]}">${esc(victim)}</b>`;
+    const kname = killer ? `<b style="color:${killerColor}">${esc(killer)}</b> ` : '';
+    row.innerHTML = `${kname}<span class="weap">[${esc(w ? w.name : 'world')}]${headshot ? ' <span class="hs">HS</span>' : ''}</span> <b style="color:${victimColor}">${esc(victim)}</b>`;
     this.el.feed.prepend(row);
     while (this.el.feed.children.length > 6) this.el.feed.lastChild.remove();
     setTimeout(() => row.classList.add('fade'), 6000);
@@ -157,7 +161,7 @@ export class Hud {
   announce(text, team) {
     const el = this.el.ann;
     el.textContent = text;
-    el.style.color = team === TEAM.A || team === TEAM.B ? TEAM_COLORS[team] : '#ffcf4a';
+    el.style.color = team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ffcf4a';
     el.classList.remove('show');
     void el.offsetWidth;
     el.classList.add('show');
@@ -176,7 +180,7 @@ export class Hud {
 
   chatMessage(name, text, team) {
     const row = document.createElement('div');
-    row.innerHTML = `<b style="color:${TEAM_COLORS[team] || '#ddd'}">${esc(name)}:</b> ${esc(text)}`;
+    row.innerHTML = `<b style="color:${team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ddd'}">${esc(name)}:</b> ${esc(text)}`;
     this.el.chat.appendChild(row);
     while (this.el.chat.children.length > 6) this.el.chat.firstChild.remove();
     setTimeout(() => row.classList.add('fade'), 9000);
@@ -201,11 +205,17 @@ export class Hud {
   // ------------------------------------------------------------------------------------------------
   setStatus(m, myTeam, myId, roster) {
     if (!m) return;
+    const ca = this.palette.team(TEAM.A), cb = this.palette.team(TEAM.B);
+    if (this._ca !== ca || this._cb !== cb) {
+      this._ca = ca; this._cb = cb;
+      this.root.style.setProperty('--alpha', ca);
+      this.root.style.setProperty('--bravo', cb);
+    }
     const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
     let html = '';
     const phase = m.ph === 'warmup' ? `<div class="phase">MATCH STARTS IN ${Math.ceil(m.tl)}</div>` : '';
     const timer = m.ph === 'live' && m.tl < 9000 ? `<div class="timer">${fmt(m.tl)}</div>` : '';
-    const teamScores = (s, lim, timerHtml = timer) => `
+    const teamScores = (s = [0, 0], lim = 1, timerHtml = timer) => `
       <div class="scores">
         <div class="team a ${myTeam === TEAM.A ? 'mine' : ''}"><span>${s[0]}</span><div class="bar"><i style="width:${Math.min(100, (s[0] / lim) * 100)}%"></i></div></div>
         ${timerHtml || '<div class="timer"></div>'}
@@ -215,8 +225,8 @@ export class Hud {
       case 'dom':
         html = teamScores(m.s, m.lim) + `<div class="zones">${(m.z || []).map(([id, owner, progress, contested]) => {
           const capturing = owner === TEAM.NONE && Math.abs(progress) > 0.02 ? (progress < 0 ? TEAM.A : TEAM.B) : -1;
-          const bg = owner !== TEAM.NONE ? TEAM_COLORS[owner] : 'rgba(255,255,255,0.12)';
-          const fill = capturing >= 0 ? `<i style="height:${Math.abs(progress) * 100}%;background:${TEAM_COLORS[capturing]}"></i>` : '';
+          const bg = owner !== TEAM.NONE ? this.palette.team(owner) : 'rgba(255,255,255,0.12)';
+          const fill = capturing >= 0 ? `<i style="height:${Math.abs(progress) * 100}%;background:${this.palette.team(capturing)}"></i>` : '';
           return `<div class="zone ${contested ? 'contested' : ''}" style="background:${bg}">${fill}<span>${id}</span></div>`;
         }).join('')}</div>`;
         break;
@@ -232,7 +242,7 @@ export class Hud {
       case 'elim': {
         const [round, t, aliveA, aliveB, live] = m.rd || [1, 0, 0, 0, 0];
         html = teamScores(m.s, m.lim, `<div class="timer">${fmt(t)}</div>`)
-          + `<div class="round">ROUND ${round} · <span style="color:${TEAM_COLORS[0]}">${aliveA} alive</span> vs <span style="color:${TEAM_COLORS[1]}">${aliveB} alive</span>${live ? '' : ' · NEXT ROUND SOON'}</div>`;
+          + `<div class="round">ROUND ${round} · <span style="color:${ca}">${aliveA} alive</span> vs <span style="color:${cb}">${aliveB} alive</span>${live ? '' : ' · NEXT ROUND SOON'}</div>`;
         break;
       }
       case 'horde': {
@@ -277,7 +287,7 @@ export class Hud {
       `<td>${r.kills}</td><td>${r.deaths}</td><td>${this.modeId === 'gungame' ? r.tier : r.score}</td><td>${r.isBot ? '—' : r.ping}</td></tr>`;
     const head = `<tr><th>NAME</th><th>K</th><th>D</th><th>${this.modeId === 'gungame' ? 'TIER' : 'SCORE'}</th><th>PING</th></tr>`;
     if (teams) {
-      target.innerHTML = [TEAM.A, TEAM.B].map((t) => `<div class="board-team"><h3 style="color:${TEAM_COLORS[t]}">${TEAM_NAMES[t]}</h3>` +
+      target.innerHTML = [TEAM.A, TEAM.B].map((t) => `<div class="board-team" style="border-top: 4px solid ${this.palette.team(t)}"><h3 style="color:${this.palette.team(t)}">${this.palette.teamLabel(t)}</h3>` +
         `<table>${head}${rows.filter((r) => r.team === t).sort(sortKey).map(row).join('')}</table></div>`).join('');
     } else {
       target.innerHTML = `<div class="board-team wide"><h3>PLAYERS</h3><table>${head}${rows.sort(sortKey).map(row).join('')}</table></div>`;
@@ -292,7 +302,7 @@ export class Hud {
   showEnd(text, team, roster, scores, myId, teams, offline) {
     const el = this.el.end;
     el.style.display = 'flex';
-    el.innerHTML = `<h1 style="color:${team === TEAM.A || team === TEAM.B ? TEAM_COLORS[team] : '#ffcf4a'}">${esc(text)}</h1><div class="end-board"></div>
+    el.innerHTML = `<h1 style="color:${team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ffcf4a'}">${esc(text)}</h1><div class="end-board"></div>
       <div class="end-actions">${offline ? '<button data-act="again">PLAY AGAIN</button>' : '<span class="hint">Next match starts automatically…</span>'}<button data-act="leave">MAIN MENU</button></div>`;
     this.renderScoreboard($('.end-board', el), roster, scores, myId, teams);
     el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
@@ -360,6 +370,35 @@ export class Hud {
     this.el.stats.textContent = text;
   }
 
+  /** Crosshair turns the enemy colour over an enemy, the team colour over a teammate (with their name). */
+  setCrosshairTarget(kind, allyName) {
+    const tagText = kind === 'ally' && allyName ? `TEAMMATE · ${allyName}` : '';
+    if (kind !== this.crossTarget) {
+      this.crossTarget = kind;
+      this.el.cross.classList.toggle('on-enemy', kind === 'enemy');
+      this.applyCrosshairStyle();
+    }
+    if (tagText !== this._allyTag) {
+      this._allyTag = tagText;
+      this.el.allyTag.textContent = tagText;
+      this.el.allyTag.style.color = this.palette.colors.ally;
+      this.el.allyTag.style.display = tagText ? 'block' : 'none';
+    }
+  }
+
+  /** Health panel shows which team you are on, in your team colour. */
+  setTeamBadge(team, teamsMode, modeId) {
+    const key = team + ':' + teamsMode + ':' + this.palette.team(team) + ':' + modeId;
+    if (key === this._badgeKey) return;
+    this._badgeKey = key;
+    const color = teamsMode ? this.palette.team(team) : this.palette.colors.ally;
+    const text = !teamsMode ? 'NO TEAMS · ALL ENEMIES'
+      : modeId === 'horde' ? 'YOUR SQUAD · CO-OP' : `${TEAM_NAMES[team] || ''} · YOUR TEAM`;
+    this.el.teamBadge.textContent = text;
+    this.el.teamBadge.style.color = color;
+    this.el.vitals.style.borderLeft = `5px solid ${color}`;
+  }
+
   /** Shows or hides optional HUD parts according to the settings. */
   applySettings() {
     this.el.minimap.style.display = settings.showMinimap ? '' : 'none';
@@ -422,7 +461,7 @@ export class Hud {
         const z = this.map.zones.find((q) => q.id === id);
         if (!z) continue;
         const [px, py] = project(z.x, z.z);
-        ctx.fillStyle = owner === TEAM.NONE ? 'rgba(255,255,255,0.8)' : TEAM_COLORS[owner];
+        ctx.fillStyle = owner === TEAM.NONE ? 'rgba(255,255,255,0.8)' : this.palette.team(owner);
         ctx.font = 'bold 12px system-ui';
         ctx.textAlign = 'center';
         ctx.fillText(id, px, py + 4);
@@ -432,10 +471,13 @@ export class Hud {
     }
     for (const o of others) {
       const [px, py] = project(o.x, o.z);
-      ctx.fillStyle = o.ally ? '#5ef08c' : '#ff3b30';
+      ctx.fillStyle = o.color || (o.ally ? '#1e90ff' : '#ff2020');
       ctx.beginPath();
-      ctx.arc(px, py, o.ally ? 3.5 : 4, 0, Math.PI * 2);
+      ctx.arc(px, py, o.ally ? 4 : 4.5, 0, Math.PI * 2);
       ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.stroke();
     }
     ctx.restore();
     // Player arrow (always pointing up).
@@ -460,8 +502,9 @@ const TEMPLATE = `
   <div id="streak"></div>
   <div id="crosshair" data-style="cross"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i><i class="ring"></i></div>
   <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="ally-tag"></div>
   <div id="protect">SPAWN PROTECTION</div>
-  <div id="vitals"><div class="label">HEALTH</div><div id="hp-value">100</div><div class="bar"><div id="hp-fill"></div></div></div>
+  <div id="vitals"><div id="team-badge" class="label"></div><div class="label">HEALTH</div><div id="hp-value">100</div><div class="bar"><div id="hp-fill"></div></div></div>
   <div id="ammo"><div id="weapon-name"></div><div class="count"><span id="ammo-mag">30</span><span class="sep">/</span><span id="ammo-reserve">120</span></div><div id="weapon-slots"></div></div>
   <div id="reload-bar"><div id="reload-fill"></div><span>RELOADING</span></div>
   <div id="death"><div id="death-text"></div><div id="death-timer"></div></div>

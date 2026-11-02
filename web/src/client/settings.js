@@ -13,6 +13,11 @@ export const DEFAULTS = {
   crosshairStyle: 'auto', // 'auto' (per weapon) | 'cross' | 'dotcross' | 'dot' | 'circle'
   showFps: true,
   showMinimap: true,
+  teamColors: 'standard',       // 'standard' (your team blue, enemies red) | 'colorblind' (blue / yellow) | 'classic'
+  outlines: true,               // coloured outline around every player
+  enemyMarkers: true,           // arrow over enemies you can see
+  allyMarkers: true,            // teammate names + markers, visible through walls
+  crosshairTargetColor: true,   // crosshair turns red on enemies, blue on teammates
   cameraBob: true,       // head bob and screen shake
   renderScale: 1,        // fraction of the quality preset's resolution
   quality: coarsePointer() ? 'medium' : 'high', // phones/tablets default to a lighter renderer

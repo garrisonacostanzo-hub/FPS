@@ -351,3 +351,10 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
   .set { grid-template-columns: minmax(0, 1fr) minmax(90px, 140px) 40px; font-size: 12px; }
   .set-cards { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------------------------- team visibility */
+#team-badge { font-weight: 800; letter-spacing: 2px; margin-bottom: 2px; }
+#hud.touch #vitals #team-badge { display: block; font-size: 8px; letter-spacing: 1px; white-space: nowrap; overflow: hidden; }
+#ally-tag { position: absolute; left: 50%; top: calc(50% + 26px); transform: translateX(-50%); display: none; font-size: 12px; font-weight: 800; letter-spacing: 2px; text-shadow: 0 1px 3px #000, 0 0 2px #000; white-space: nowrap; }
+#crosshair.on-enemy i { box-shadow: 0 0 0 1px rgba(0,0,0,0.8), 0 0 6px rgba(255,40,40,0.6); }
+.board-team h3 { font-size: 13px; }

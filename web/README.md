@@ -126,7 +126,8 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 
 If the browser or an embedding frame refuses mouse capture (pointer lock), the game switches to free-cursor mouse look. Clicking in-game tries to capture the mouse again.
 
-**Settings** has four sections. The main menu's SETTINGS tab and the in-game pause menu show the same options:
+**Settings** has five sections. The main menu's SETTINGS tab and the in-game pause menu show the same options:
+* **Teams & visibility:** see "Telling teams apart" above.
 * **Touch controls:** listed above.
 * **Mouse & keyboard:**
   * Sensitivity, and a separate sensitivity while aiming.
@@ -139,6 +140,27 @@ If the browser or an embedding frame refuses mouse capture (pointer lock), the g
 * **Graphics & audio:** quality preset, resolution scale and volume.
 
 Settings are saved in `localStorage`. **Reset to defaults** keeps your callsign, loadout and match setup.
+
+## Telling teams apart
+
+Colours are relative to you: **your team is always blue and enemies are always red**, whichever team you're on. In free-for-all everyone else is red.
+
+* **Characters:** helmets, bodies, arms and legs are in the team colour, with a slight glow so they show in the dark and in shade.
+* **Outlines:** a coloured outline makes players stand out from the scenery at any distance.
+* **Enemy arrows:** a red arrow appears over enemies you can actually see. It never shows through walls.
+* **Teammates:** a blue arrow and their name, visible through walls.
+* **Crosshair:** turns **red** on an enemy. On a teammate it turns **blue** and shows "TEAMMATE · name".
+* **Rest of the screen:** your team's colour also marks:
+  * the health panel ("BRAVO · YOUR TEAM")
+  * the score bar and scoreboard ("ALPHA · ENEMY" / "BRAVO · YOUR TEAM")
+  * the kill feed, minimap dots, capture zones and bullet tracers
+
+Change these under **Settings → Teams & visibility**:
+* **Team colours:**
+  * **Blue vs red**
+  * **Blue vs yellow:** easier with red–green colour blindness.
+  * **Classic:** Alpha blue, Bravo orange.
+* Each visual aid can be turned on or off: outlines, enemy arrows, teammate names and arrows, and the crosshair colour change.
 
 ## Weapons
 
@@ -206,6 +228,7 @@ web/
       ├─ audio.js           # procedural WebAudio (positional gunfire, footsteps…)
       ├─ settings.js        # persisted settings
       ├─ settingsui.js      # settings schema + controls shared by the menu and the pause screen
+      ├─ teamcolors.js      # team colours relative to the player (ally blue / enemy red, colour-blind, classic)
       ├─ index.html         # page template
       └─ styles.css
 ```

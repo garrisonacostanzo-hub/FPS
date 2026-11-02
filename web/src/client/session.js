@@ -1,7 +1,7 @@
 // Client game session: input -> fixed-rate commands with client-side prediction, server reconciliation,
 // snapshot interpolation of remote players/bots, effects, audio, HUD and camera.
 import * as THREE from 'three';
-import { BTN, TEAM, TEAM_COLORS } from '../shared/constants.js';
+import { BTN, TEAM } from '../shared/constants.js';
 import { buildMap } from '../shared/map.js';
 import { DEG, clamp, dirFromAngles, lerp, lerpAngle, rayBox, raySphere } from '../shared/math.js';
 import { MODE_LIST } from '../shared/modes.js';
@@ -13,6 +13,7 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { GameRenderer } from './renderer.js';
 import { onSettingsChanged, saveSettings, settings } from './settings.js';
+import { TeamPalette } from './teamcolors.js';
 import { TouchControls, enterMobileFullscreen, touchControlsWanted } from './touch.js';
 
 const CMD_DT = 1 / 60;
@@ -44,7 +45,12 @@ export class ClientSession {
     this.renderer.loadMap(this.map, this.modeId === 'dom');
     this.input = new Input(canvas);
     this.input.onLockChange = (locked) => this.onLockChange(locked);
+    this.palette = new TeamPalette();
+    this.renderer.teamColor = (team) => this.palette.team(team);
+    this.losCache = new Map();
+    this.crosshairAlly = null;
     this.hud = new Hud(hudRoot, {
+      palette: this.palette,
       map: this.map,
       modeId: this.modeId,
       online: !this.offline,
@@ -247,7 +253,8 @@ export class ClientSession {
         const from = { x: muzzle.x, y: muzzle.y, z: muzzle.z };
         const w = WEAPONS[ev.w] || WEAPONS.rifle;
         ev.p.forEach((p, i) => {
-          if (ev.p.length === 1 || i % 2 === 0) this.renderer.tracer(from, p, 0xffd27a);
+          const shooter = this.roster.get(ev.s);
+          if (ev.p.length === 1 || i % 2 === 0) this.renderer.tracer(from, p, this.palette.tracer(ev.s, shooter ? shooter.team : TEAM.NONE));
           if (p[6] !== 2) this.renderer.impact(p, p[6] === 1);
         });
         this.renderer.muzzleLight(this.tmpV.set(from.x, from.y, from.z));
@@ -270,7 +277,8 @@ export class ClientSession {
       }
       case 'kill': {
         const killer = this.roster.get(ev.k), victim = this.roster.get(ev.v);
-        this.hud.killfeed(killer ? killer.name : '', victim ? victim.name : '?', ev.w, ev.hs === 1, killer ? killer.team : TEAM.NONE, victim ? victim.team : TEAM.NONE, ev.k === this.myId || ev.v === this.myId);
+        this.hud.killfeed(killer ? killer.name : '', victim ? victim.name : '?', ev.w, ev.hs === 1,
+          this.palette.entity(ev.k, killer ? killer.team : TEAM.NONE), this.palette.entity(ev.v, victim ? victim.team : TEAM.NONE), ev.k === this.myId || ev.v === this.myId);
         if (ev.k === this.myId && ev.v !== this.myId) this.hud.streak(ev.st);
         return;
       }
@@ -373,8 +381,14 @@ export class ClientSession {
     this.transport.update(dt);
     if (!this.running) return;
 
-    this.crosshairTarget = this.touchUI.enabled && !this.paused && this.actor.alive && (settings.aimAssist || settings.autoFire !== 'off')
-      ? this.findCrosshairTarget() : 0;
+    this.palette.setContext(this.myId, this.myTeam, this.teams);
+    const wantTarget = (this.touchUI.enabled && (settings.aimAssist || settings.autoFire !== 'off')) || settings.crosshairTargetColor;
+    this.crosshairAlly = null;
+    this.crosshairTarget = wantTarget && !this.paused && this.actor.alive ? this.findCrosshairTarget() : 0;
+    this.hud.setCrosshairTarget(
+      settings.crosshairTargetColor ? (this.crosshairTarget === 2 ? 'enemy' : this.crosshairAlly ? 'ally' : null) : null,
+      this.crosshairAlly,
+    );
     this.updateLook(dt);
     this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed() });
     if (!this.paused && this.input.consume('chat')) {
@@ -481,6 +495,26 @@ export class ClientSession {
     };
   }
 
+  /** Is this enemy visible from the camera (not behind a wall)? Re-checked about 8 times a second per enemy. */
+  enemyInSight(id, pose) {
+    if (!pose.alive || !this.actor.alive) return false;
+    const now = performance.now();
+    const cached = this.losCache.get(id);
+    if (cached && now - cached.t < 120) return cached.v;
+    const m = this.actor.motor;
+    const ox = m.x, oy = m.y + eyeHeightOf(m), oz = m.z;
+    let visible = false;
+    for (const h of [1.55 - 0.5 * pose.crouch, 1.0 - 0.3 * pose.crouch]) { // head, then chest
+      const dx = pose.x - ox, dy = pose.y + h - oy, dz = pose.z - oz;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist > 160) break;
+      const wall = this.world.raycast(ox, oy, oz, dx / dist, dy / dist, dz / dist, dist);
+      if (!wall || wall.t >= dist - 0.3) { visible = true; break; }
+    }
+    this.losCache.set(id, { t: now - (id % 5) * 15, v: visible });
+    return visible;
+  }
+
   /** Auto-fire setting: 'off', 'hip' (never while aiming down sights) or 'always'. */
   autoFireAllowed() {
     const mode = settings.autoFire;
@@ -497,7 +531,8 @@ export class ClientSession {
 
   /**
    * What is under the crosshair: 0 nothing, 1 an enemy close to it (aim assist), 2 an enemy directly in it
-   * and in range with a clear line of sight (auto-fire).
+   * and in range with a clear line of sight (auto-fire). Also sets this.crosshairAlly to the name of a
+   * teammate directly under the crosshair, if any.
    */
   findCrosshairTarget() {
     const m = this.actor.motor;
@@ -509,10 +544,11 @@ export class ClientSession {
     const range = Math.min(w.range, 120);
     const hb = this.tmpHitbox || (this.tmpHitbox = {});
     let result = 0;
+    let allyDist = Infinity;
     for (const [id, pose] of this.renderPoses) {
       if (!pose.alive || id === this.myId) continue;
       const r = this.roster.get(id);
-      if (this.teams && r && r.team === this.myTeam) continue;
+      const ally = this.teams && r && r.team === this.myTeam;
       hitboxesAt(pose.x, pose.y, pose.z, pose.crouch, hb);
       const cx = (hb.minx + hb.maxx) / 2 - ox, cy = (hb.miny + hb.maxy) / 2 - oy, cz = (hb.minz + hb.maxz) / 2 - oz;
       const dist = Math.hypot(cx, cy, cz);
@@ -528,8 +564,13 @@ export class ClientSession {
       const pdx = t >= 0 ? dir.x : cx / dist, pdy = t >= 0 ? dir.y : cy / dist, pdz = t >= 0 ? dir.z : cz / dist;
       const wall = this.world.raycast(ox, oy, oz, pdx, pdy, pdz, probe);
       if (wall && wall.t < probe - 0.05) continue;
-      if (t >= 0) return 2;
-      result = 1;
+      if (ally) {
+        // A teammate directly under the crosshair: remembered for the "friendly" crosshair and name tag.
+        if (t >= 0 && t < allyDist) { allyDist = t; this.crosshairAlly = r.name; }
+        continue;
+      }
+      if (t >= 0) result = 2;
+      else if (result < 1) result = 1;
     }
     return result;
   }
@@ -618,9 +659,11 @@ export class ClientSession {
         alive: (eb[7] & 1) === 1, sprint: (eb[7] & 2) !== 0, weapon: eb[8], hp: eb[9],
       };
       this.renderPoses.set(id, pose);
-      const ally = this.teams && info.team === this.myTeam;
-      const label = ally ? info.name : null;
-      const speed = this.renderer.syncCharacter(id, { team: info.team, weapon: pose.weapon }, pose, dt, label, TEAM_COLORS[info.team]);
+      const ally = this.palette.isAlly(id, info.team);
+      const color = this.palette.entity(id, info.team);
+      const label = ally && settings.allyMarkers ? info.name : null;
+      const marker = ally ? settings.allyMarkers : settings.enemyMarkers && this.enemyInSight(id, pose);
+      const speed = this.renderer.syncCharacter(id, { team: info.team, weapon: pose.weapon, color, ally, outline: settings.outlines }, pose, dt, label, color, marker);
       // Remote footsteps.
       if (pose.alive && speed > 1.2) {
         const stride = (this.strides.get(id) || 0) + speed * dt;
@@ -693,6 +736,7 @@ export class ClientSession {
     this.hud.setCrosshair(px, w.id === 'sniper' ? Math.max(this.actor.aim01, 0) : this.actor.aim01, visible);
     this.hud.setAmmo(ws);
     this.hud.updateDeathTimer();
+    this.hud.setTeamBadge(this.myTeam, this.teams, this.modeId);
     if (this.modeState) this.hud.setStatus(this.modeState, this.myTeam, this.myId, this.roster);
     if (this.modeState && this.modeState.z) this.renderer.updateZones(this.modeState.z, performance.now() / 1000);
     this.hud.showScoreboard(this.input.scoreboard && !this.ended, this.roster, this.scores, this.myId, this.teams);
@@ -709,7 +753,7 @@ export class ClientSession {
         if (!pose.alive) continue;
         const r = this.roster.get(id);
         const ally = this.teams && r && r.team === this.myTeam;
-        if (ally || now - (this.lastFireSeen.get(id) || -1e9) < 1500) others.push({ x: pose.x, z: pose.z, ally });
+        if (ally || now - (this.lastFireSeen.get(id) || -1e9) < 1500) others.push({ x: pose.x, z: pose.z, ally, color: this.palette.entity(id, r ? r.team : TEAM.NONE) });
       }
     }
     if (settings.showMinimap) this.hud.drawMinimap({ x: m.x, z: m.z, yaw: this.viewYaw }, others, this.modeState && this.modeState.z ? this.modeState.z : [], this.myTeam, this.modeId === 'dom');
