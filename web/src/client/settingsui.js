@@ -67,6 +67,7 @@ export const SETTINGS_SECTIONS = [
     items: [
       { k: 'quality', label: 'Graphics quality', type: 'select', options: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], hint: 'Low is fastest (no shadows).', note: 'Takes effect in the next match.' },
       { k: 'renderScale', label: 'Resolution', type: 'range', min: 0.5, max: 1, step: 0.05, fmt: pct, hint: 'Lower it if the game stutters.' },
+      { k: 'dynamicResolution', label: 'Dynamic resolution (keeps the frame rate smooth)', type: 'check' },
       { k: 'volume', label: 'Volume', type: 'range', min: 0, max: 1, step: 0.05, fmt: pct },
     ],
   },

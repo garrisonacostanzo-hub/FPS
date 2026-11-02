@@ -1,6 +1,8 @@
 // Authoritative game simulation. Runs in the host player's browser for online play and in your own tab for offline
 // play (same code path), so offline and online behave identically.
-import { BOT_NAMES, DIFFICULTY, HISTORY_SECONDS, MAX_REWIND, PLAYER, TEAM, TEAM_NAMES, TICK_RATE } from './constants.js';
+import { BOT_NAMES, HISTORY_SECONDS, MAX_REWIND, PLAYER, TEAM, TEAM_NAMES, TICK_RATE } from './constants.js';
+import { botCosmetics, sanitizeCamo, sanitizeOutfit } from './cosmetics.js';
+import { sanitizeDifficulty } from './difficulty.js';
 import { BotBrain } from './bots.js';
 import { clamp, dist2, dist3, distToSegment, makeRng, rayBox, raySphere } from './math.js';
 import { buildMap, generateCoverPoints } from './map.js';
@@ -46,7 +48,8 @@ export class Game {
       mode: config.mode || 'tdm',
       map: config.map || 'outpost',
       bots: clamp(config.bots ?? 8, 0, 24),
-      difficulty: DIFFICULTY[config.difficulty] ? config.difficulty : 'normal',
+      difficulty: sanitizeDifficulty(config.difficulty),
+      ranked: !!config.ranked,
       scoreLimit: config.scoreLimit || 0,
       timeLimit: config.timeLimit || 0,
     };
@@ -111,11 +114,13 @@ export class Game {
   // ==============================================================================================
   // Entities
   // ==============================================================================================
-  createEntity({ name, isBot, team, loadout, clientId }) {
+  createEntity({ name, isBot, team, loadout, clientId, cosmetics }) {
     const id = this.nextId++;
+    const look = isBot ? botCosmetics(this.rng) : cosmetics || {};
     const primary = loadout && PRIMARY_WEAPONS.includes(loadout[0]) ? loadout[0] : 'rifle';
     const e = {
       id, name, isBot, clientId,
+      camo: sanitizeCamo(look.camo), outfit: sanitizeOutfit(look.outfit),
       team: TEAM.NONE,
       motor: createMotorState(0, 0, 0, 0),
       ws: createWeaponState([primary, 'pistol']),
@@ -135,8 +140,8 @@ export class Game {
     return e;
   }
 
-  addHuman(clientId, name, loadout) {
-    const e = this.createEntity({ name: name || 'Player', isBot: false, loadout, clientId });
+  addHuman(clientId, name, loadout, cosmetics) {
+    const e = this.createEntity({ name: name || 'Player', isBot: false, loadout, clientId, cosmetics });
     this.rebalanceBots();
     if (this.phase !== 'ended' && (this.mode.respawns || this.phase === 'warmup')) e.respawnAt = this.time + 0.2;
     else e.respawnAt = Infinity;
@@ -161,7 +166,11 @@ export class Game {
     const name = BOT_NAMES[this.botNameIndex++ % BOT_NAMES.length];
     const primary = BOT_PRIMARY_POOL[Math.floor(this.rng() * BOT_PRIMARY_POOL.length)];
     const e = this.createEntity({ name: (options.horde ? 'X-' : 'BOT ') + name, isBot: true, team, loadout: [primary, 'pistol'] });
-    if (difficulty) e.brain.setDifficulty(difficulty);
+    if (difficulty !== undefined && difficulty !== null) {
+      // Numeric (adaptive) levels: each bot varies a little around the target so they don't all play alike.
+      const level = typeof difficulty === 'number' ? Math.max(0, Math.min(4, difficulty + (this.rng() - 0.5) * 0.5)) : difficulty;
+      e.brain.setDifficulty(level);
+    }
     const loadout = this.mode.loadoutFor(e);
     if (loadout) setLoadout(e.ws, loadout, e.clock);
     this.respawnEntity(e);
@@ -660,7 +669,7 @@ export class Game {
   }
 
   roster() {
-    return [...this.entities.values()].map((e) => [e.id, e.name, e.team, e.isBot ? 1 : 0]);
+    return [...this.entities.values()].map((e) => [e.id, e.name, e.team, e.isBot ? 1 : 0, e.camo, e.outfit]);
   }
 
   scores() {

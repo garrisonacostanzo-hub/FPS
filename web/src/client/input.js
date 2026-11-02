@@ -15,7 +15,7 @@ export class Input {
     this.crouchToggled = false;
     this.aimToggled = false;
     this.enabled = true;
-    this.locked = false;
+    this.locked = document.pointerLockElement === canvas; // the menu may already have captured the mouse
     this.fallback = false; // playing without pointer lock
     this.touchMode = false; // on-screen touch controls drive the game (see touch.js)
     this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, aimHold: 0, crouch: false, scoreboard: false, lookX: 0, lookY: 0 };
@@ -78,7 +78,10 @@ export class Input {
 
   /** Starts playing: pointer lock if the browser allows it, otherwise free-cursor fallback. */
   requestLock() {
-    if (this.locked) return;
+    if (this.locked) {
+      if (this.onLockChange) this.onLockChange(true);
+      return;
+    }
     if (this.touchMode) { this.enterFallback(); return; } // touch play never needs the mouse captured
     this.tryLock(true);
   }

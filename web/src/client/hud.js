@@ -4,7 +4,12 @@ import { TEAM, TEAM_NAMES } from '../shared/constants.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { saveSettings, settings } from './settings.js';
+import { RARITY } from '../shared/cosmetics.js';
+import { difficultyName } from '../shared/difficulty.js';
+import { camoSwatch } from './gfx/textures.js';
+import { adaptiveBotLevel, rankedBotLevel, xpForLevel } from './profile.js';
 import { bindSettingsControls, renderSettingsSections, touchSettingsRelevant } from './settingsui.js';
+import { levelBadge, rankEmblem } from './ui/emblems.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -299,16 +304,79 @@ export class Hud {
     if (show) this.renderScoreboard(this.el.board, roster, scores, myId, teams);
   }
 
-  showEnd(text, team, roster, scores, myId, teams, offline) {
+  /** After-action report: result, scoreboard, match grade, XP / level, Ranked SR and new unlocks. */
+  showEnd(text, team, roster, scores, myId, teams, offline, report, ranked) {
     const el = this.el.end;
     el.style.display = 'flex';
-    el.innerHTML = `<h1 style="color:${team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ffcf4a'}">${esc(text)}</h1><div class="end-board"></div>
-      <div class="end-actions">${offline ? '<button data-act="again">PLAY AGAIN</button>' : '<span class="hint">Next match starts automatically…</span>'}<button data-act="leave">MAIN MENU</button></div>`;
+    const result = report ? report.result : null;
+    const head = result === 'win' ? 'VICTORY' : result === 'loss' ? 'DEFEAT' : result === 'draw' ? 'DRAW' : 'MATCH OVER';
+    const color = team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ffcf4a';
+    el.innerHTML = `
+      <div class="aar">
+        <div class="aar-head ${result || ''}"><h1>${head}</h1><p style="color:${color}">${esc(text)}${ranked ? ' · RANKED' : ''}</p></div>
+        <div class="aar-body">
+          <div class="end-board"></div>
+          ${report ? this.renderProgress(report, ranked) : ''}
+        </div>
+        <div class="end-actions">${offline ? `<button data-act="again">${ranked ? 'PLAY RANKED AGAIN' : 'PLAY AGAIN'}</button>` : '<span class="hint">Next match starts automatically…</span>'}<button data-act="leave">MAIN MENU</button></div>
+      </div>`;
     this.renderScoreboard($('.end-board', el), roster, scores, myId, teams);
     el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.act === 'again' && this.callbacks.onPlayAgain) this.callbacks.onPlayAgain();
       if (b.dataset.act === 'leave' && this.callbacks.onLeave) this.callbacks.onLeave();
     }));
+    // Animate the bars from their old values to the new ones.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      el.querySelectorAll('[data-to]').forEach((bar) => { bar.style.width = bar.dataset.to + '%'; });
+    }));
+  }
+
+  renderProgress(r, ranked) {
+    const need = (lvl) => xpForLevel(lvl);
+    const fromPct = r.levelUps ? 0 : (r.xpBefore / need(r.levelBefore)) * 100;
+    const toPct = (r.xpAfter / need(r.levelAfter)) * 100;
+    let rankedHtml = '';
+    if (r.ranked) {
+      const rk = r.ranked;
+      const span = rk.rankAfter.next ? rk.rankAfter.next - rk.rankAfter.floor : 1;
+      const from = rk.rankBefore.step === rk.rankAfter.step ? ((rk.before - rk.rankAfter.floor) / span) * 100 : rk.promoted ? 0 : 100;
+      const to = rk.rankAfter.next ? ((rk.after - rk.rankAfter.floor) / span) * 100 : 100;
+      rankedHtml = `
+        <div class="aar-rank">
+          ${rankEmblem(rk.rankAfter, 76)}
+          <div>
+            ${rk.promoted ? '<div class="aar-flag up">PROMOTED</div>' : rk.demoted ? '<div class="aar-flag down">DEMOTED</div>' : ''}
+            <b style="color:${rk.rankAfter.color}">${rk.rankAfter.name.toUpperCase()}</b>
+            <span class="aar-sr ${rk.delta >= 0 ? 'up' : 'down'}">${rk.delta >= 0 ? '+' : ''}${rk.delta} SR</span>
+            <div class="aar-bar"><i style="width:${Math.max(0, Math.min(100, from))}%;background:${rk.rankAfter.color}" data-to="${Math.max(0, Math.min(100, to)).toFixed(1)}"></i></div>
+            <small>${rk.after} SR${rk.rankAfter.next ? ` · ${rk.rankAfter.next - rk.after} to next division` : ''}</small>
+          </div>
+        </div>`;
+    }
+    const unlocks = r.unlocks.length ? `
+      <div class="aar-unlocks"><h3>UNLOCKED</h3>${r.unlocks.map((u) => `
+        <div class="aar-unlock" style="--rar:${RARITY[u.item.rarity].color}">
+          ${u.kind === 'camo' ? `<span class="aar-swatch" style="background-image:url(${camoSwatch(u.item.id)})"></span>` : '<span class="aar-swatch op">OP</span>'}
+          <div><b>${esc(u.item.name.toUpperCase())}</b><small>${u.kind === 'camo' ? 'WEAPON CAMO' : 'OPERATOR'} · ${RARITY[u.item.rarity].name.toUpperCase()}</small></div>
+        </div>`).join('')}</div>` : '';
+    const next = ranked ? rankedBotLevel() : adaptiveBotLevel();
+    const dSkill = r.skill.after - r.skill.before;
+    return `
+      <div class="aar-side">
+        <div class="aar-grade-row"><span class="m-grade big g-${r.grade}">${r.grade}</span>
+          <div><b>MATCH GRADE</b><small>PERFORMANCE ${Math.round(r.p * 100)}%${r.abandoned ? ' · LEFT EARLY' : ''}</small></div></div>
+        ${rankedHtml}
+        <div class="aar-xp">
+          ${levelBadge(r.levelAfter, 46)}
+          <div>
+            ${r.levelUps ? `<div class="aar-flag up">LEVEL UP</div>` : ''}
+            <b>LEVEL ${r.levelAfter}</b> <span class="aar-sr up">+${r.xp} XP</span>
+            <div class="aar-bar"><i style="width:${fromPct.toFixed(1)}%" data-to="${toPct.toFixed(1)}"></i></div>
+          </div>
+        </div>
+        <div class="aar-skill">SKILL ${r.skill.after.toFixed(2)} <em class="${dSkill >= 0 ? 'up' : 'down'}">${dSkill >= 0 ? '▲' : '▼'} ${Math.abs(dSkill).toFixed(2)}</em> · NEXT BOTS: ${difficultyName(next).toUpperCase()} (LV ${next.toFixed(1)})</div>
+        ${unlocks}
+      </div>`;
   }
 
   hideEnd() {
@@ -330,7 +398,7 @@ export class Hud {
           <span>ROOM CODE</span><b>${this.roomCode}</b><button data-act="copy">COPY</button>
         </div>
         <p class="sub">${this.isHost
-          ? 'You are hosting: friends open VANGUARD.html, choose PLAY ONLINE and enter this code. Keep this tab open — the match runs in your browser.'
+          ? 'You are hosting: friends open VANGUARD.html, choose ONLINE and enter this code. Keep this tab open — the match runs in your browser.'
           : 'Online match — the game keeps running while paused.'}</p>`
           : '<p class="sub">Offline match — the game keeps running.</p>'}
         <label class="set"><span>Primary weapon (next respawn)</span><select data-k="primary" data-type="select">${primaryOptions}</select></label>
@@ -397,6 +465,14 @@ export class Hud {
     this.el.teamBadge.textContent = text;
     this.el.teamBadge.style.color = color;
     this.el.vitals.style.borderLeft = `5px solid ${color}`;
+  }
+
+  /** Sniper scope overlay while fully aimed. */
+  setScope(on) {
+    if (on === this._scope) return;
+    this._scope = on;
+    if (!this.el.scope) this.el.scope = this.root.querySelector('#scope');
+    this.el.scope.style.display = on ? 'block' : 'none';
   }
 
   /** Shows or hides optional HUD parts according to the settings. */
@@ -503,6 +579,7 @@ const TEMPLATE = `
   <div id="crosshair" data-style="cross"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i><i class="ring"></i></div>
   <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
   <div id="ally-tag"></div>
+  <div id="scope"><i class="h"></i><i class="v"></i></div>
   <div id="protect">SPAWN PROTECTION</div>
   <div id="vitals"><div id="team-badge" class="label"></div><div class="label">HEALTH</div><div id="hp-value">100</div><div class="bar"><div id="hp-fill"></div></div></div>
   <div id="ammo"><div id="weapon-name"></div><div class="count"><span id="ammo-mag">30</span><span class="sep">/</span><span id="ammo-reserve">120</span></div><div id="weapon-slots"></div></div>

@@ -21,7 +21,13 @@ const result = await build({
 });
 
 const js = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
-const css = readFileSync(join(root, 'src/client/styles.css'), 'utf8');
+// Embed the UI font (Barlow Condensed, SIL Open Font License) so the single file works offline.
+const fontDir = join(root, 'node_modules/@fontsource/barlow-condensed/files');
+const fontFaces = [500, 600, 700].map((weight) => {
+  const data = readFileSync(join(fontDir, `barlow-condensed-latin-${weight}-normal.woff2`)).toString('base64');
+  return `@font-face{font-family:'Barlow Condensed';font-style:normal;font-weight:${weight};font-display:swap;src:url(data:font/woff2;base64,${data}) format('woff2');}`;
+}).join('\n');
+const css = fontFaces + '\n' + readFileSync(join(root, 'src/client/styles.css'), 'utf8');
 const template = readFileSync(join(root, 'src/client/index.html'), 'utf8');
 const html = template.replace('/*__CSS__*/', () => css).replace('/*__JS__*/', () => js);
 const out = join(dist, 'VANGUARD.html');

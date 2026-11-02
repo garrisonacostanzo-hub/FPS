@@ -1,70 +1,26 @@
-// Three.js presentation layer: map geometry (merged per material, box-mapped UVs), lighting and shadows,
-// character models, capture zones, effects (tracers, impacts, muzzle flashes) and the first-person view model.
+// Three.js presentation layer: physically based sky + image-based lighting, detailed procedural materials, shadows,
+// foliage, operators (outfits) and guns (camos), first-person arms + weapon, combat effects and post-processing.
 import * as THREE from 'three';
 import { TEAM, TEAM_COLORS } from '../shared/constants.js';
 import { WEAPONS } from '../shared/weapons.js';
+import { Effects } from './gfx/effects.js';
+import { addFoliage } from './gfx/foliage.js';
+import { animateCamos, buildFirstPersonArms, buildGun, buildOperator, mat } from './gfx/models.js';
+import { PostFX } from './gfx/post.js';
+import { buildSky } from './gfx/sky.js';
+import { surfaceTextures } from './gfx/textures.js';
 import { settings } from './settings.js';
 
 const PALETTE = {
-  floor: '#6b6e73', wall: '#c27a43', wallDark: '#4b4f57', concrete: '#8a8d90', crate: '#8a6a43', metal: '#737a82',
+  floor: '#6b6e73', wall: '#b9764a', wallDark: '#4b4f57', concrete: '#8a8d90', crate: '#8a6a43', metal: '#737a82',
   sand: '#a89268', container: '#2f6f8f', containerB: '#8f3a2f', rock: '#77736c', stairs: '#5c6066', brick: '#8e4f3a',
-  baseA: '#3d6fb5', baseB: '#b5523d', boundary: '#34373c',
+  baseA: '#56677d', baseB: '#7d5f56', boundary: '#34373c',
 };
-const GROUND = { grass: '#4f6b3a', concrete: '#6f6a62', dark: '#2b2f38' };
-
-// ---------------------------------------------------------------------------------------------------------------
-// Procedural textures
-// ---------------------------------------------------------------------------------------------------------------
-function makeTexture(kind, color, size = 256) {
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const g = c.getContext('2d');
-  g.fillStyle = color;
-  g.fillRect(0, 0, size, size);
-  const shade = (alpha) => `rgba(0,0,0,${alpha})`;
-  const light = (alpha) => `rgba(255,255,255,${alpha})`;
-  let seed = 7;
-  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  for (let i = 0; i < 900; i++) {
-    g.fillStyle = rnd() < 0.5 ? shade(rnd() * 0.07) : light(rnd() * 0.05);
-    g.fillRect(rnd() * size, rnd() * size, 2 + rnd() * 4, 2 + rnd() * 4);
-  }
-  g.strokeStyle = shade(0.22);
-  g.lineWidth = 3;
-  if (kind === 'brick') {
-    const bh = size / 8;
-    for (let y = 0; y < 8; y++) {
-      g.beginPath(); g.moveTo(0, y * bh); g.lineTo(size, y * bh); g.stroke();
-      const off = (y % 2) * size / 8;
-      for (let x = 0; x < 4; x++) { g.beginPath(); g.moveTo(off + x * size / 4, y * bh); g.lineTo(off + x * size / 4, (y + 1) * bh); g.stroke(); }
-    }
-  } else if (kind === 'crate') {
-    for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(0, i * size / 4); g.lineTo(size, i * size / 4); g.stroke(); }
-    g.lineWidth = 10; g.strokeStyle = shade(0.25); g.strokeRect(5, 5, size - 10, size - 10);
-  } else if (kind === 'container') {
-    g.lineWidth = 6;
-    for (let x = 0; x < size; x += 16) { g.strokeStyle = x % 32 ? light(0.08) : shade(0.2); g.beginPath(); g.moveTo(x, 0); g.lineTo(x, size); g.stroke(); }
-  } else if (kind === 'stairs' || kind === 'boundary') {
-    g.lineWidth = 8;
-    for (let y = 0; y < size; y += 32) { g.strokeStyle = shade(0.25); g.beginPath(); g.moveTo(0, y); g.lineTo(size, y); g.stroke(); }
-  } else if (kind === 'sand') {
-    for (let y = 0; y < 4; y++) for (let x = 0; x < 3; x++) {
-      g.fillStyle = shade(0.08); g.beginPath();
-      g.ellipse((x + 0.5 + (y % 2) * 0.5) * size / 3, (y + 0.5) * size / 4, size / 7, size / 10, 0, 0, Math.PI * 2); g.fill();
-    }
-  } else if (kind !== 'rock') {
-    const cells = kind === 'floor' || kind === 'ground' ? 4 : 2;
-    for (let i = 0; i <= cells; i++) {
-      g.beginPath(); g.moveTo(0, i * size / cells); g.lineTo(size, i * size / cells); g.stroke();
-      g.beginPath(); g.moveTo(i * size / cells, 0); g.lineTo(i * size / cells, size); g.stroke();
-    }
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
+const SURFACE = {
+  floor: 'floor', wall: 'brick', wallDark: 'concrete', concrete: 'concrete', crate: 'crate', metal: 'metal', sand: 'sand',
+  container: 'container', containerB: 'container', rock: 'rock', stairs: 'stairs', brick: 'brick', baseA: 'concrete', baseB: 'concrete', boundary: 'boundary',
+};
+const GROUND = { grass: ['grass', '#4c6a35'], concrete: ['asphalt', '#5f5b55'], dark: ['asphalt', '#2a2e36'] };
 
 // ---------------------------------------------------------------------------------------------------------------
 // Map geometry: one merged mesh per material with world-scaled UVs
@@ -75,10 +31,10 @@ function buildMapMeshes(map, scene, quality) {
     if (!groups.has(b.m)) groups.set(b.m, []);
     groups.get(b.m).push(b);
   }
-  const meshes = [];
+  const texSize = quality === 'high' ? 512 : quality === 'medium' ? 256 : 128;
   for (const [m, boxes] of groups) {
     const positions = [], normals = [], uvs = [], indices = [];
-    const tile = m === 'floor' ? 4 : 2;
+    const tile = m === 'floor' ? 4 : 2.5;
     for (const b of boxes) {
       const [x0, y0, z0] = b.min, [x1, y1, z1] = b.max;
       const faces = [
@@ -90,7 +46,7 @@ function buildMapMeshes(map, scene, quality) {
         [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [0, 0, -1], x1 - x0, y1 - y0, 'xy'],
       ];
       for (const [a, bq, c, d, n, w, h, plane] of faces) {
-        if (n[1] === -1 && y0 <= 0.01) continue; // bottom faces on the ground are never visible
+        if (n[1] === -1 && y0 <= 0.01) continue;
         const base = positions.length / 3;
         for (const p of [a, bq, c, d]) { positions.push(p[0], p[1], p[2]); normals.push(n[0], n[1], n[2]); }
         const ou = plane === 'xz' ? x0 / tile : plane === 'zy' ? z0 / tile : x0 / tile;
@@ -105,122 +61,54 @@ function buildMapMeshes(map, scene, quality) {
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
     geometry.computeBoundingSphere();
-    const kind = m.startsWith('container') ? 'container' : m === 'baseA' || m === 'baseB' ? 'wall' : m;
+    const shiny = m === 'metal' || m.startsWith('container');
+    const tex = surfaceTextures(SURFACE[m] || 'concrete', PALETTE[m] || '#888888', texSize);
     const material = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: makeTexture(kind, PALETTE[m] || '#888888'),
-      roughness: m === 'metal' || m.startsWith('container') ? 0.55 : 0.9,
-      metalness: m === 'metal' || m.startsWith('container') ? 0.35 : 0.02,
+      map: tex.map,
+      normalMap: quality === 'low' ? null : tex.normalMap,
+      normalScale: new THREE.Vector2(0.9, 0.9),
+      roughness: tex.roughness,
+      metalness: shiny ? 0.45 : 0.02,
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = quality !== 'low';
     mesh.receiveShadow = true;
     scene.add(mesh);
-    meshes.push(mesh);
   }
-  return meshes;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Characters
+// Labels and markers
 // ---------------------------------------------------------------------------------------------------------------
-const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-const sphereGeo = new THREE.SphereGeometry(0.5, 12, 10);
-const materialCache = new Map();
-function mat(color, emissive = 0) {
-  const key = color + ':' + emissive;
-  if (!materialCache.has(key)) {
-    materialCache.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.1, emissive: emissive ? color : 0x000000, emissiveIntensity: emissive }));
-  }
-  return materialCache.get(key);
-}
-
-function part(geo, material, sx, sy, sz, x, y, z, parent) {
-  const m = new THREE.Mesh(geo, material);
-  m.scale.set(sx, sy, sz);
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  parent.add(m);
-  return m;
-}
-
-function buildGun(weaponId, scale = 1, flashParent = true) {
-  const w = WEAPONS[weaponId] || WEAPONS.rifle;
-  const g = new THREE.Group();
-  const [sx, sy, sz] = w.size.map((v) => v * scale);
-  const body = mat(w.color), accent = mat(w.accent);
-  part(boxGeo, body, sx, sy, sz, 0, 0, 0, g);
-  part(boxGeo, body, sx * 0.8, sy * 0.85, sz * 0.32, 0, -sy * 0.08, sz * 0.64, g);
-  part(boxGeo, mat('#1c1d20'), sx * 0.7, sy * 0.95, sx * 1.1, 0, -sy * 0.75, sz * 0.2, g);
-  part(boxGeo, accent, sx * 0.45, sy * 0.3, sz * 0.32, 0, sy * 0.62, sz * 0.05, g);
-  part(boxGeo, accent, sx * 0.6, sy * 1.1, sx * 1.3, 0, -sy * 0.8, -sz * 0.12, g);
-  const barrelLen = w.barrel * scale;
-  part(boxGeo, mat('#111214'), sx * 0.35, sx * 0.35, barrelLen, 0, sy * 0.15, -sz * 0.5 - barrelLen * 0.5, g);
-  const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, sy * 0.15, -sz * 0.5 - barrelLen - 0.02);
-  g.add(muzzle);
-  g.userData.muzzle = muzzle;
-  if (flashParent) {
-    const flash = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffcc66, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending }));
-    flash.scale.set(0.25 * scale, 0.25 * scale, 1);
-    flash.visible = false;
-    muzzle.add(flash);
-    g.userData.flash = flash;
-  }
-  return g;
-}
-
 function nameSprite(text, color) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
   const g = c.getContext('2d');
-  g.font = 'bold 30px system-ui, sans-serif';
+  g.font = '700 30px "Barlow Condensed", "Arial Narrow", system-ui, sans-serif';
   g.textAlign = 'center';
   g.lineWidth = 6;
-  g.strokeStyle = 'rgba(0,0,0,0.7)';
+  g.strokeStyle = 'rgba(0,0,0,0.75)';
   g.strokeText(text, 128, 40);
   g.fillStyle = color;
   g.fillText(text, 128, 40);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, fog: false }));
   sprite.scale.set(1.6, 0.4, 1);
   sprite.renderOrder = 10;
   return sprite;
 }
 
-// Outline: a slightly larger copy of each body part, drawn inside-out in a flat team colour (not fogged), so
-// players stand out from the scenery at any distance and in the dark.
-const outlineCache = new Map();
-function outlineMaterial(color) {
-  if (!outlineCache.has(color)) outlineCache.set(color, new THREE.MeshBasicMaterial({ color, side: THREE.BackSide, fog: false }));
-  return outlineCache.get(color);
-}
-function addOutline(mesh, color, thickness = 0.045) {
-  const o = new THREE.Mesh(mesh.geometry, outlineMaterial(color));
-  const s = mesh.scale;
-  o.scale.set(1 + (2 * thickness) / s.x, 1 + (2 * thickness) / s.y, 1 + (2 * thickness) / s.z);
-  o.castShadow = false;
-  mesh.add(o);
-  return o;
-}
-
-// Marker over a player's head: a chevron that keeps the same size on screen at any distance.
 const markerCache = new Map();
 function markerSprite(color, throughWalls) {
   const key = color + throughWalls;
   if (!markerCache.has(key)) {
     const c = document.createElement('canvas');
-    c.width = 64; c.height = 64;
+    c.width = c.height = 64;
     const g = c.getContext('2d');
-    g.beginPath();
-    g.moveTo(10, 14); g.lineTo(54, 14); g.lineTo(32, 50); g.closePath();
-    g.lineJoin = 'round';
-    g.lineWidth = 7;
-    g.strokeStyle = 'rgba(0,0,0,0.85)';
-    g.stroke();
-    g.fillStyle = color;
-    g.fill();
+    g.beginPath(); g.moveTo(10, 14); g.lineTo(54, 14); g.lineTo(32, 50); g.closePath();
+    g.lineJoin = 'round'; g.lineWidth = 7; g.strokeStyle = 'rgba(0,0,0,0.85)'; g.stroke();
+    g.fillStyle = color; g.fill();
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     markerCache.set(key, new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: !throughWalls, depthWrite: false, sizeAttenuation: false, fog: false }));
@@ -231,60 +119,34 @@ function markerSprite(color, throughWalls) {
   return sprite;
 }
 
-function shade(color, k) {
-  return '#' + new THREE.Color(color).multiplyScalar(k).getHexString();
-}
-
+// ---------------------------------------------------------------------------------------------------------------
+// Characters
+// ---------------------------------------------------------------------------------------------------------------
 class CharacterModel {
-  constructor(scene, info) {
-    this.root = new THREE.Group();
-    this.body = new THREE.Group();
-    this.root.add(this.body);
-    scene.add(this.root);
+  constructor(scene, info, simple) {
     this.info = info;
-    // The whole body carries the team colour (slightly glowing so it reads in shade and at night).
-    const teamColor = info.color || TEAM_COLORS[info.team] || TEAM_COLORS[2];
-    const team = mat(teamColor, 0.4), teamDark = mat(shade(teamColor, 0.5), 0.25);
-    const dark = mat('#23262b'), skin = mat('#3a3f47');
-    const parts = [];
-    this.legL = part(boxGeo, teamDark, 0.18, 0.85, 0.22, -0.11, 0.43, 0, this.body);
-    this.legR = part(boxGeo, teamDark, 0.18, 0.85, 0.22, 0.11, 0.43, 0, this.body);
-    this.torso = part(boxGeo, team, 0.5, 0.62, 0.28, 0, 1.15, 0, this.body);
-    parts.push(this.legL, this.legR, this.torso);
-    part(boxGeo, dark, 0.38, 0.4, 0.14, 0, 1.18, 0.2, this.body);           // backpack
-    part(boxGeo, dark, 0.52, 0.1, 0.3, 0, 0.86, 0, this.body);              // belt
-    this.headPivot = new THREE.Group();
-    this.headPivot.position.set(0, 1.5, 0);
-    this.body.add(this.headPivot);
-    parts.push(part(sphereGeo, skin, 0.3, 0.32, 0.3, 0, 0.14, 0, this.headPivot));
-    parts.push(part(boxGeo, team, 0.34, 0.14, 0.36, 0, 0.28, 0.01, this.headPivot)); // helmet
-    part(boxGeo, mat(info.ally ? '#cfe8ff' : '#ffd36b', 0.7), 0.22, 0.06, 0.05, 0, 0.17, -0.14, this.headPivot);
-    this.armPivot = new THREE.Group();
-    this.armPivot.position.set(0, 1.35, 0);
-    this.body.add(this.armPivot);
-    parts.push(part(boxGeo, team, 0.12, 0.12, 0.5, 0.24, -0.05, -0.2, this.armPivot));
-    parts.push(part(boxGeo, team, 0.12, 0.12, 0.45, -0.18, -0.08, -0.25, this.armPivot));
-    if (info.outline) for (const p of parts) addOutline(p, teamColor);
-    this.marker = markerSprite(teamColor, !!info.ally);
+    const op = buildOperator({ color: info.color || TEAM_COLORS[info.team] || TEAM_COLORS[2], outfit: info.outfit, outline: info.outline, simple });
+    Object.assign(this, op);
+    scene.add(this.root);
+    this.weapon = null;
+    this.weaponKey = '';
+    this.setWeapon(info.weapon || 'rifle');
+    this.label = null;
+    this.marker = markerSprite(info.color, !!info.ally);
     this.marker.position.set(0, info.ally ? 2.55 : 2.25, 0);
     this.marker.visible = false;
     this.root.add(this.marker);
-    this.gunSocket = new THREE.Group();
-    this.gunSocket.position.set(0.12, -0.02, -0.4);
-    this.armPivot.add(this.gunSocket);
-    this.weapon = null;
-    this.setWeapon(info.weapon || 'rifle');
-    this.label = null;
     this.walkPhase = 0;
     this.deathBlend = 0;
     this.lastPos = null;
   }
 
   setWeapon(id) {
-    if (this.weaponId === id) return;
-    this.weaponId = id;
+    const key = id + ':' + this.info.camo;
+    if (this.weaponKey === key) return;
+    this.weaponKey = key;
     if (this.weapon) this.gunSocket.remove(this.weapon);
-    this.weapon = buildGun(id, 1);
+    this.weapon = buildGun(id, 1, this.info.camo, false);
     this.gunSocket.add(this.weapon);
   }
 
@@ -297,11 +159,15 @@ class CharacterModel {
     }
   }
 
+  setMarker(visible) {
+    this.marker.visible = visible;
+  }
+
   update(p, dt) {
     this.root.position.set(p.x, p.y, p.z);
     this.root.rotation.y = p.yaw;
-    const crouchScale = 1 - 0.36 * p.crouch;
-    this.body.scale.y = crouchScale;
+    const crouch = p.crouch;
+    this.body.scale.y = 1 - 0.3 * crouch;
     this.armPivot.rotation.x = p.pitch;
     this.headPivot.rotation.x = p.pitch * 0.6;
     let speed = 0;
@@ -309,20 +175,19 @@ class CharacterModel {
     this.lastPos = { x: p.x, z: p.z };
     if (speed > 0.3 && p.alive) {
       this.walkPhase += dt * (4 + speed * 1.4);
-      const swing = Math.sin(this.walkPhase) * Math.min(0.7, speed * 0.12);
-      this.legL.rotation.x = swing; this.legR.rotation.x = -swing;
+      const swing = Math.sin(this.walkPhase) * Math.min(0.75, speed * 0.12);
+      this.legL.rotation.x = swing - crouch * 0.6;
+      this.legR.rotation.x = -swing - crouch * 0.6;
+      this.body.position.y = Math.abs(Math.cos(this.walkPhase)) * 0.03;
     } else {
-      this.legL.rotation.x *= 0.8; this.legR.rotation.x *= 0.8;
+      this.legL.rotation.x += (-crouch * 0.6 - this.legL.rotation.x) * Math.min(1, dt * 10);
+      this.legR.rotation.x += (crouch * 0.3 - this.legR.rotation.x) * Math.min(1, dt * 10);
     }
     this.deathBlend += ((p.alive ? 0 : 1) - this.deathBlend) * Math.min(1, dt * 6);
     this.body.rotation.x = -this.deathBlend * 1.45;
-    this.body.position.y = this.deathBlend * 0.15;
+    if (this.deathBlend > 0.01) this.body.position.y = this.deathBlend * 0.15;
     if (this.label) this.label.visible = p.alive;
     return speed;
-  }
-
-  setMarker(visible) {
-    this.marker.visible = visible;
   }
 
   flash() {
@@ -358,11 +223,12 @@ export class GameRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.quality = settings.quality;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality !== 'low', powerPreference: 'high-performance' });
+    const post = this.quality !== 'low';
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     this.applyPixelRatio(false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = this.quality !== 'low';
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.autoClear = false;
@@ -371,21 +237,21 @@ export class GameRenderer {
     this.camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.05, 700);
     this.vmScene = new THREE.Scene();
     this.vmCamera = new THREE.PerspectiveCamera(58, 1, 0.01, 10);
-    this.vmScene.add(new THREE.HemisphereLight(0xdfe8ff, 0x55504a, 3.2));
-    const vmSun = new THREE.DirectionalLight(0xffffff, 2.4);
+    this.vmScene.add(new THREE.HemisphereLight(0xdfe8ff, 0x55504a, 1.6));
+    const vmSun = new THREE.DirectionalLight(0xffffff, 2.2);
     vmSun.position.set(1, 2, 1);
     this.vmScene.add(vmSun);
-    const vmRim = new THREE.DirectionalLight(0x9fc4ff, 1.4);
+    const vmRim = new THREE.DirectionalLight(0x9fc4ff, 1.2);
     vmRim.position.set(-1.5, 0.5, -1);
     this.vmScene.add(vmRim);
 
+    this.localLook = { camo: 'default', outfit: 'rifleman', color: '#1e90ff' };
     this.characters = new Map();
-    this.tracers = [];
-    this.impacts = [];
-    this.puffs = [];
-    this.flashLights = [];
     this.zoneVisuals = [];
-    this.tmp = new THREE.Vector3();
+    this.fx = new Effects(this.scene);
+    this.post = post ? new PostFX(this.renderer, this.scene, this.camera, this.vmScene, this.vmCamera, this.quality) : null;
+    this.lastEffects = performance.now();
+    this.dynScale = 1;
     this.resize();
     this._resize = () => this.resize();
     window.addEventListener('resize', this._resize);
@@ -393,8 +259,9 @@ export class GameRenderer {
 
   /** Pixel ratio from the quality preset, scaled by the Resolution setting. */
   applyPixelRatio(resize = true) {
-    const base = Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : 1);
-    const ratio = base * Math.max(0.5, Math.min(1, settings.renderScale || 1));
+    const base = Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : this.quality === 'medium' ? 1.25 : 1);
+    const dyn = settings.dynamicResolution === false ? 1 : this.dynScale || 1;
+    const ratio = base * Math.max(0.5, Math.min(1, settings.renderScale || 1)) * dyn;
     if (ratio === this.pixelRatio) return;
     this.pixelRatio = ratio;
     this.renderer.setPixelRatio(ratio);
@@ -408,55 +275,58 @@ export class GameRenderer {
     this.camera.updateProjectionMatrix();
     this.vmCamera.aspect = w / h;
     this.vmCamera.updateProjectionMatrix();
+    if (this.post) this.post.setSize(w, h, this.pixelRatio);
   }
 
   loadMap(map, modeUsesZones) {
     const theme = map.theme || {};
-    this.scene.background = new THREE.Color(theme.sky || 0x9ec9ff);
-    this.scene.fog = new THREE.FogExp2(theme.fog || 0xbdd4ea, theme.fogDensity || 0.008);
-    const night = theme.timeOfDay === 'night';
-    this.scene.add(new THREE.HemisphereLight(night ? 0x6677aa : 0xdfeeff, night ? 0x1a1c22 : 0x4a4232, night ? 0.9 : 1.25));
-    const sun = new THREE.DirectionalLight(night ? 0xaab8ff : theme.timeOfDay === 'dusk' ? 0xffc28a : 0xfff3df, theme.sunIntensity || 2.4);
-    const s = theme.sun || [0.5, 1, 0.3];
-    sun.position.set(s[0] * 120, s[1] * 120, s[2] * 120);
+    const night = theme.timeOfDay === 'night', dusk = theme.timeOfDay === 'dusk';
+    this.scene.fog = new THREE.FogExp2(theme.fog || 0xbdd4ea, (theme.fogDensity || 0.008) * 0.85);
+    const sky = buildSky(this.renderer, this.scene, theme, this.quality);
+    this.vmScene.environment = this.scene.environment;
+    this.vmScene.environmentIntensity = 0.6;
+
+    const low = this.quality === 'low';
+    if (low) { this.scene.environment = null; this.vmScene.environment = null; } // cheapest shading for weak devices
+    this.scene.add(new THREE.HemisphereLight(night ? 0x5566aa : 0xdfeeff, night ? 0x14161c : 0x4a4232, (night ? 0.5 : 0.55) * (low ? 2.2 : 1)));
+    const sun = new THREE.DirectionalLight(night ? 0x9fb0ff : dusk ? 0xffb07a : 0xfff1dc, (theme.sunIntensity || 2.4) * (night ? 0.7 : 1.15));
+    sun.position.copy(sky.sunDir).multiplyScalar(120);
     sun.castShadow = this.quality !== 'low';
     const size = map.half + 10;
     sun.shadow.camera.left = -size; sun.shadow.camera.right = size;
     sun.shadow.camera.top = size; sun.shadow.camera.bottom = -size;
     sun.shadow.camera.near = 1; sun.shadow.camera.far = 400;
-    sun.shadow.mapSize.set(this.quality === 'high' ? 4096 : 2048, this.quality === 'high' ? 4096 : 2048);
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.03;
-    this.scene.add(sun);
-    this.scene.add(sun.target);
+    const sm = this.quality === 'high' ? 4096 : 2048;
+    sun.shadow.mapSize.set(sm, sm);
+    sun.shadow.bias = -0.0003;
+    sun.shadow.normalBias = 0.035;
+    this.scene.add(sun, sun.target);
 
-    // Ground (extends beyond the boundary so the horizon is not empty).
-    const groundTex = makeTexture('ground', GROUND[theme.ground] || GROUND.grass);
-    groundTex.repeat.set(map.half * 2 / 4 * 3, map.half * 2 / 4 * 3);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(map.half * 6, map.half * 6), new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1 }));
+    // Ground (extends past the boundary so the horizon is not empty).
+    const [gKind, gColor] = GROUND[theme.ground] || GROUND.grass;
+    const gTex = surfaceTextures(gKind, gColor, this.quality === 'low' ? 256 : 512);
+    const rep = (map.half * 6) / 5;
+    for (const t of [gTex.map, gTex.normalMap]) t.repeat.set(rep, rep);
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(map.half * 6, map.half * 6),
+      new THREE.MeshStandardMaterial({ map: gTex.map, normalMap: this.quality === 'low' ? null : gTex.normalMap, normalScale: new THREE.Vector2(1.1, 1.1), roughness: gTex.roughness }),
+    );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
 
     buildMapMeshes(map, this.scene, this.quality);
+    if (this.world) addFoliage(this.scene, map, this.world, this.quality);
 
-    // Distant scenery ring.
-    const hillMat = new THREE.MeshStandardMaterial({ color: night ? 0x1c2030 : theme.timeOfDay === 'dusk' ? 0x6e5a48 : 0x5f7a55, roughness: 1, flatShading: true });
+    // Distant hills.
+    const hillMat = new THREE.MeshStandardMaterial({ color: night ? 0x161a26 : dusk ? 0x6a5444 : 0x55704c, roughness: 1, flatShading: true });
     for (let i = 0; i < 28; i++) {
       const a = (i / 28) * Math.PI * 2;
-      const r = map.half * 1.9 + (i % 3) * 12;
-      const hill = new THREE.Mesh(new THREE.ConeGeometry(25 + (i % 4) * 9, 30 + (i % 5) * 12, 6), hillMat);
-      hill.position.set(Math.cos(a) * r, 8, Math.sin(a) * r);
+      const r = map.half * 2.2 + (i % 3) * 14;
+      const hill = new THREE.Mesh(new THREE.ConeGeometry(30 + (i % 4) * 10, 34 + (i % 5) * 14, 7), hillMat);
+      hill.position.set(Math.cos(a) * r, 10, Math.sin(a) * r);
       this.scene.add(hill);
     }
-
-    // Muzzle-flash light pool (fixed count keeps shaders stable).
-    for (let i = 0; i < 4; i++) {
-      const light = new THREE.PointLight(0xffc070, 0, 9, 2);
-      this.scene.add(light);
-      this.flashLights.push({ light, until: 0 });
-    }
-
     if (modeUsesZones) this.buildZones(map.zones);
   }
 
@@ -464,21 +334,21 @@ export class GameRenderer {
     for (const z of zones) {
       const group = new THREE.Group();
       group.position.set(z.x, z.y || 0, z.z);
-      const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
-      const ring = new THREE.Mesh(new THREE.RingGeometry(z.r - 0.35, z.r, 48), ringMat);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
+      const ring = new THREE.Mesh(new THREE.RingGeometry(z.r - 0.3, z.r, 64), ringMat);
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.06;
       group.add(ring);
-      const beamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false });
-      const beam = new THREE.Mesh(new THREE.CylinderGeometry(z.r, z.r, 10, 40, 1, true), beamMat);
+      const beamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false });
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(z.r, z.r, 10, 48, 1, true), beamMat);
       beam.position.y = 5;
       group.add(beam);
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 6), mat('#cccccc'));
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 6), mat('#b8bcc2', { rough: 0.4, metal: 0.7 }));
       pole.position.set(0, 3, 0);
       group.add(pole);
-      const flagMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.4 });
-      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.04), flagMat);
-      flag.position.set(0.72, 5.4, 0);
+      const flagMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.6, side: THREE.DoubleSide });
+      const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.9, 6, 1), flagMat);
+      flag.position.set(0.78, 5.4, 0);
       group.add(flag);
       const label = nameSprite(z.id, '#ffffff');
       label.position.set(0, 7, 0);
@@ -504,6 +374,7 @@ export class GameRenderer {
       v.flagMat.color.copy(color);
       v.flagMat.emissive.copy(color);
       v.flag.position.y = 1.4 + 4 * (owner === TEAM.NONE ? Math.abs(progress) : 1);
+      v.flag.rotation.y = Math.sin(time * 2 + v.id.charCodeAt(0)) * 0.15;
     }
   }
 
@@ -512,10 +383,10 @@ export class GameRenderer {
   // ------------------------------------------------------------------------------------------------
   syncCharacter(id, info, pose, dt, labelText, labelColor, markerVisible = false) {
     let c = this.characters.get(id);
-    const look = info.color + (info.outline ? 'o' : '') + (info.ally ? 'a' : 'e');
+    const look = `${info.color}${info.outline ? 'o' : ''}${info.ally ? 'a' : 'e'}${info.outfit}${info.camo}`;
     if (!c || c.info.team !== info.team || c.look !== look) {
       if (c) c.dispose(this.scene);
-      c = new CharacterModel(this.scene, info);
+      c = new CharacterModel(this.scene, info, this.quality === 'low');
       c.look = look;
       this.characters.set(id, c);
       c.labelKey = null;
@@ -541,111 +412,45 @@ export class GameRenderer {
     const c = this.characters.get(id);
     if (!c) return null;
     c.flash();
-    return c.muzzleWorld(out);
+    const p = c.muzzleWorld(out);
+    if (Math.random() < 0.5) this.fx.muzzleSmoke(p);
+    return p;
   }
 
   // ------------------------------------------------------------------------------------------------
   // Effects
   // ------------------------------------------------------------------------------------------------
-  tracer(from, to, color = 0xffd27a) {
-    let t = this.tracers.find((x) => !x.line.visible);
-    if (!t) {
-      if (this.tracers.length > 60) t = this.tracers[0];
-      else {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
-        const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false }));
-        line.frustumCulled = false;
-        this.scene.add(line);
-        t = { line, until: 0 };
-        this.tracers.push(t);
-      }
-    }
-    const pos = t.line.geometry.attributes.position;
-    pos.setXYZ(0, from.x, from.y, from.z);
-    pos.setXYZ(1, to[0], to[1], to[2]);
-    pos.needsUpdate = true;
-    t.line.material.color.set(color);
-    t.line.material.opacity = 0.9;
-    t.line.visible = true;
-    t.until = performance.now() + 60;
-  }
+  tracer(from, to, color = 0xffd27a) { this.fx.tracer(from, to, color); }
 
-  impact(point, character) {
-    if (character) {
-      let p = this.puffs.find((x) => !x.sprite.visible);
-      if (!p) {
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xb01818, transparent: true, opacity: 0.85, depthWrite: false }));
-        this.scene.add(sprite);
-        p = { sprite, until: 0 };
-        this.puffs.push(p);
-      }
-      p.sprite.position.set(point[0], point[1], point[2]);
-      p.sprite.scale.set(0.3, 0.3, 1);
-      p.sprite.visible = true;
-      p.start = performance.now();
-      p.until = p.start + 300;
-      return;
-    }
-    let d = this.impacts.length < 120 ? null : this.impacts[(this.impactIndex = ((this.impactIndex || 0) + 1) % 120)];
-    if (!d) {
-      const mesh = new THREE.Mesh(new THREE.CircleGeometry(0.06, 6), new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
-      this.scene.add(mesh);
-      d = { mesh };
-      this.impacts.push(d);
-    }
-    const n = new THREE.Vector3(point[3], point[4], point[5]);
-    if (n.lengthSq() < 0.5) n.set(0, 1, 0);
-    d.mesh.position.set(point[0] + n.x * 0.01, point[1] + n.y * 0.01, point[2] + n.z * 0.01);
-    d.mesh.lookAt(d.mesh.position.x + n.x, d.mesh.position.y + n.y, d.mesh.position.z + n.z);
-    d.mesh.scale.setScalar(0.7 + Math.random() * 0.8);
-    // Spark puff.
-    let p = this.puffs.find((x) => !x.sprite.visible);
-    if (!p && this.puffs.length < 40) {
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
-      this.scene.add(sprite);
-      p = { sprite, until: 0 };
-      this.puffs.push(p);
-    }
-    if (p) {
-      p.sprite.material.color.set(0xffe0a0);
-      p.sprite.position.set(point[0], point[1], point[2]);
-      p.sprite.scale.set(0.15, 0.15, 1);
-      p.sprite.visible = true;
-      p.start = performance.now();
-      p.until = p.start + 90;
-    }
-  }
+  impact(point, character) { this.fx.impact(point, character); }
 
-  muzzleLight(position) {
-    const slot = this.flashLights.reduce((a, b) => (a.until < b.until ? a : b), this.flashLights[0]);
-    if (!slot) return;
-    slot.light.position.copy(position);
-    slot.light.intensity = 6;
-    slot.until = performance.now() + 50;
-  }
+  muzzleLight(position) { this.fx.muzzleLight(position); }
+
+  setDamage(amount) { if (this.post) this.post.setDamage(amount); }
 
   updateEffects() {
     const now = performance.now();
-    for (const t of this.tracers) if (t.line.visible && now > t.until) t.line.visible = false;
-    for (const p of this.puffs) {
-      if (!p.sprite.visible) continue;
-      if (now > p.until) { p.sprite.visible = false; continue; }
-      const k = (now - p.start) / (p.until - p.start);
-      p.sprite.material.opacity = 0.9 * (1 - k);
-      p.sprite.scale.multiplyScalar(1.04);
-    }
-    for (const f of this.flashLights) if (now > f.until) f.light.intensity = 0;
+    const dt = Math.min(0.1, (now - this.lastEffects) / 1000);
+    this.lastEffects = now;
+    this.fx.update(dt);
   }
 
   // ------------------------------------------------------------------------------------------------
   // View model
   // ------------------------------------------------------------------------------------------------
+  /** Camo, outfit (sleeves) and team colour (armbands) for the first-person view. */
+  setLocalLook(look) {
+    const changed = look.camo !== this.localLook.camo || look.outfit !== this.localLook.outfit || look.color !== this.localLook.color;
+    this.localLook = { ...look };
+    if (changed && this.vmWeaponId) { const id = this.vmWeaponId; this.vmWeaponId = null; this.setViewWeapon(id); }
+  }
+
   setViewWeapon(id) {
     if (this.vmWeaponId === id && this.vmGun) return;
     this.vmWeaponId = id;
     if (this.vmGun) this.vmScene.remove(this.vmGun);
-    this.vmGun = buildGun(id, 0.55);
+    this.vmGun = buildGun(id, 0.55, this.localLook.camo, true);
+    buildFirstPersonArms(this.vmGun, { outfit: this.localLook.outfit, color: this.localLook.color, weapon: id });
     this.vmGun.traverse((o) => { o.castShadow = false; });
     this.vmScene.add(this.vmGun);
     this.vm = { kick: 0, kickV: 0, swayX: 0, swayY: 0, bob: 0, equipStart: performance.now(), reloadStart: 0, reloadDur: 0, sprint: 0 };
@@ -655,7 +460,12 @@ export class GameRenderer {
     if (!this.vm) return;
     this.vm.kickV += 1;
     const f = this.vmGun.userData.flash;
-    if (f) { f.visible = true; f.material.rotation = Math.random() * 6; this.vmFlashUntil = performance.now() + 45; }
+    if (f) { f.visible = true; f.material.rotation = Math.random() * 6; f.scale.setScalar(0.26 + Math.random() * 0.12); this.vmFlashUntil = performance.now() + 45; }
+    // Brass out of the ejection port, in world space next to the camera.
+    const q = this.camera.quaternion;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q), up = new THREE.Vector3(0, 1, 0).applyQuaternion(q), fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+    const origin = this.camera.position.clone().addScaledVector(right, 0.1).addScaledVector(up, -0.07).addScaledVector(fwd, 0.32);
+    if (this.vmWeaponId !== 'shotgun' || Math.random() < 0.5) this.fx.ejectCasing(origin, right, up);
   }
 
   viewModelReload(duration) {
@@ -665,7 +475,6 @@ export class GameRenderer {
   }
 
   muzzleWorldPosition(out) {
-    // Approximate the view model muzzle in world space: in front of the camera, slightly right/down.
     const v = new THREE.Vector3(0.12, -0.09, -0.7).applyQuaternion(this.camera.quaternion);
     return out.copy(this.camera.position).add(v);
   }
@@ -682,26 +491,28 @@ export class GameRenderer {
     vm.bob += dt * (4 + state.speed * 1.3);
     vm.sprint += ((state.sprinting ? 1 : 0) - vm.sprint) * Math.min(1, dt * 8);
     const aim = state.aim;
-    const bobScale = Math.min(1, state.speed / 7) * 0.012 * (1 - aim * 0.8) * (1 + vm.sprint);
+    const bobScale = Math.min(1, state.speed / 7) * 0.012 * (1 - aim * 0.85) * (1 + vm.sprint);
     const now = performance.now();
     const equip = Math.max(0, 1 - (now - vm.equipStart) / (w.equip * 1000));
     let reload = 0;
     if (vm.reloadDur > 0 && now - vm.reloadStart < vm.reloadDur) reload = Math.sin(((now - vm.reloadStart) / vm.reloadDur) * Math.PI);
     if (!state.reloading) vm.reloadDur = vm.reloadDur > 0 && now - vm.reloadStart < vm.reloadDur ? vm.reloadDur : 0;
 
-    const hip = new THREE.Vector3(0.13, -0.135, -0.42);
-    const ads = new THREE.Vector3(0, -0.062 - w.size[1] * 0.26, -0.3);
+    // Hip position, and aiming down sights with the sight line on the screen centre.
+    const hip = new THREE.Vector3(0.13, -0.13, -0.4);
+    const scoped = this.vmWeaponId === 'sniper' || this.vmWeaponId === 'dmr';
+    const ads = new THREE.Vector3(0, -this.vmGun.userData.sightY, scoped ? -0.2 : -0.24);
     const pos = hip.lerp(ads, aim);
-    pos.x += vm.swayX + Math.sin(vm.bob) * bobScale - 0.06 * vm.sprint;
-    pos.y += vm.swayY + Math.abs(Math.cos(vm.bob)) * bobScale - 0.05 * vm.sprint - 0.12 * reload - 0.3 * equip * equip;
+    pos.x += vm.swayX * (1 - aim * 0.7) + Math.sin(vm.bob) * bobScale - 0.06 * vm.sprint;
+    pos.y += vm.swayY * (1 - aim * 0.7) + Math.abs(Math.cos(vm.bob)) * bobScale - 0.05 * vm.sprint - 0.12 * reload - 0.3 * equip * equip;
     pos.z += kick * 0.045 * (1 - aim * 0.5) + 0.04 * vm.sprint;
     this.vmGun.position.copy(pos);
     this.vmGun.rotation.set(
-      kick * 0.08 * (1 - aim * 0.5) + 0.35 * reload + 0.4 * vm.sprint - 0.7 * equip * equip + vm.swayY * 2,
-      -0.55 * vm.sprint + vm.swayX * 3,
+      kick * 0.08 * (1 - aim * 0.6) + 0.35 * reload + 0.4 * vm.sprint - 0.7 * equip * equip + vm.swayY * 2 * (1 - aim * 0.7),
+      -0.55 * vm.sprint + vm.swayX * 3 * (1 - aim * 0.7),
       0.4 * reload + 0.2 * vm.sprint,
     );
-    this.vmGun.visible = state.alive;
+    this.vmGun.visible = state.alive && !(scoped && this.vmWeaponId === 'sniper' && aim > 0.95);
     if (this.vmFlashUntil && now > this.vmFlashUntil) {
       const f = this.vmGun.userData.flash;
       if (f) f.visible = false;
@@ -709,7 +520,27 @@ export class GameRenderer {
     }
   }
 
+  /** Dynamic resolution: lower the internal resolution while frames are slow, raise it again when there is headroom. */
+  adaptResolution(now) {
+    const ft = this.lastRender ? now - this.lastRender : 16;
+    this.lastRender = now;
+    this.frameAvg = this.frameAvg ? this.frameAvg * 0.94 + Math.min(ft, 100) * 0.06 : ft;
+    if (settings.dynamicResolution === false || now - (this.dynCheck || 0) < 1500) return;
+    this.dynCheck = now;
+    let s = this.dynScale;
+    if (this.frameAvg > 24 && s > 0.6) s = Math.max(0.6, s - 0.1);
+    else if (this.frameAvg < 13 && s < 1) s = Math.min(1, s + 0.05);
+    if (s !== this.dynScale) { this.dynScale = s; this.applyPixelRatio(); }
+  }
+
   render() {
+    this.adaptResolution(performance.now());
+    const time = performance.now() / 1000;
+    animateCamos(time);
+    if (this.post) {
+      this.post.render();
+      return;
+    }
     this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
     this.renderer.clearDepth();
@@ -718,14 +549,10 @@ export class GameRenderer {
 
   dispose() {
     window.removeEventListener('resize', this._resize);
-    this.scene.traverse((o) => {
-      if (o.geometry && o.geometry !== boxGeo && o.geometry !== sphereGeo) o.geometry.dispose();
-      if (o.material && !materialCache.has(o.material)) {
-        if (o.material.map) o.material.map.dispose();
-        o.material.dispose();
-      }
-    });
+    for (const c of this.characters.values()) c.dispose(this.scene);
+    if (this.post) this.post.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss();
   }
 }
 

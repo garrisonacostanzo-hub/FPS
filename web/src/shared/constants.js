@@ -1,6 +1,6 @@
 // Shared tuning constants used by the authoritative simulation (server / offline host) and client prediction.
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const MAX_ONLINE_PLAYERS = 8; // humans per peer-to-peer match (the host's upload carries everyone)
 export const GAME_TITLE = 'VANGUARD';
 
@@ -80,6 +80,11 @@ export const DIFFICULTY = {
     name: 'Elite', reaction: 0.18, accuracy: 0.9, tracking: 600, settle: 0.35, headshot: 0.4, detect: 120, fov: 130,
     detectTime: 0.4, hearing: 1.6, memory: 15, aggression: 0.8, flank: 0.6, retreatHp: 0.3, suppressTol: 0.7,
     strafe: 0.85, burst: [5, 12], pause: [0.1, 0.25], maxError: 6,
+  },
+  apex: {
+    name: 'Apex', reaction: 0.12, accuracy: 0.95, tracking: 820, settle: 0.24, headshot: 0.5, detect: 140, fov: 140,
+    detectTime: 0.3, hearing: 1.9, memory: 18, aggression: 0.88, flank: 0.7, retreatHp: 0.25, suppressTol: 0.8,
+    strafe: 0.95, burst: [6, 14], pause: [0.08, 0.2], maxError: 5,
   },
 };
 

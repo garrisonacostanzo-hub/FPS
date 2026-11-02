@@ -6,25 +6,29 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Online multiplayer.** One player hosts in their browser and friends join with a 5-character room code. Humans and bots play in the same match.
 * **Six game modes on three maps.** Every mode works both offline and online.
 * **Computer or phone.** Keyboard and mouse on a computer; on-screen touch controls on phones and tablets.
+* **Ranked mode:** you get a rank (Bronze to Legend) and a match grade after every game.
+* **Adaptive bots:** they get tougher the better you are and the more you play.
+* **62 skins:** 50 weapon camos (most earned in Ranked) and 12 operator outfits.
+* **Progression:** levels, XP and career stats, saved in cookies and browser storage.
+* **Modern graphics:** physically based sky and lighting, detailed materials, bloom, ambient occlusion, foliage and combat effects.
 
 ## Play offline
 
 1. Open **`VANGUARD.html`** in Chrome, Edge, Firefox or Safari. Double-clicking it works and no web server is needed.
-2. Go to **PLAY OFFLINE** and pick a mode, a map, the bot count and the bot difficulty.
-3. Choose your primary weapon and click **DEPLOY**.
-4. Click inside the game to capture the mouse.
+2. On the **PLAY** tab, pick a mode, a map, the bot count and the bot difficulty. The default difficulty, **Adaptive**, matches your skill.
+3. Choose your primary weapon and click **START MATCH**.
 
 ## Play online
 
 Every player needs **the same `VANGUARD.html`** and an internet connection.
 
 **Host:**
-1. Go to **PLAY ONLINE → HOST A MATCH**.
+1. Go to **ONLINE → HOST A MATCH**.
 2. Pick the mode, map, bots and difficulty, then click **HOST MATCH**.
 3. You get a room code like `K7QX3`. It appears in the pause menu (with a COPY button) and in the corner of the screen.
 4. Send the code to your friends.
 
-**Friends:** go to **PLAY ONLINE**, type the code under **JOIN A MATCH**, then click **JOIN**.
+**Friends:** go to **ONLINE**, type the code under **JOIN A MATCH**, then click **JOIN**.
 
 Some rules:
 * Up to 8 players per match. Bots fill out the teams.
@@ -44,7 +48,7 @@ The same file has touch controls. They turn on automatically when you touch the 
   * To play **online** on iPhone, put `VANGUARD.html` on any static web host and open its `https://` link in Safari. GitHub Pages and Netlify Drop (drag the file onto the page) both work.
 
 **Tips:**
-* Turn the phone sideways (landscape). On Android, tapping **DEPLOY** or **RESUME** also switches to fullscreen.
+* Turn the phone sideways (landscape). On Android, tapping **START MATCH** or **RESUME** also switches to fullscreen.
 * Phones start on the **medium** graphics preset. If it stutters, choose **low** under Settings → Graphics quality.
 
 **Touch controls:**
@@ -162,6 +166,103 @@ Change these under **Settings → Teams & visibility**:
   * **Classic:** Alpha blue, Bravo orange.
 * Each visual aid can be turned on or off: outlines, enemy arrows, teammate names and arrows, and the crosshair colour change.
 
+## Main menu
+
+The main menu is styled like a modern military shooter. A live 3D scene shows your operator in their equipped outfit, holding your weapon with its equipped camo. The tabs are:
+
+| Tab | What's there |
+|---|---|
+| **PLAY** | Offline matches against bots: mode, map, bot count, difficulty (Adaptive or a fixed level) and weapon. |
+| **RANKED** | Your rank emblem, SR and progress to the next division, season stats, recent matches, the next camo rewards and **PLAY RANKED**. |
+| **ONLINE** | Host a match and get a room code, or join one with a code. |
+| **ARMORY** | Weapon camos (50), operator outfits (12) and your loadout. Each item shows a live 3D preview, its rarity and how to unlock it. |
+| **BARRACKS** | Career stats, your skill rating and adaptive bot level, your callsign, and save data (backup code and reset). |
+| **SETTINGS** | All options and controls. |
+
+The player card in the top right shows your level, XP and rank.
+
+## Ranked
+
+Ranked is **Team Deathmatch, 5 vs 5, first to 40 kills or 8 minutes**, on a random map, against adaptive bots.
+
+**After every game** you get a match report showing:
+* **VICTORY** or **DEFEAT**
+* your **match grade** (S, A, B, C or D)
+* your **SR change**, with **PROMOTED** or **DEMOTED** when you change division
+* the XP and levels you gained
+* any newly unlocked skins
+* the bot level for your next game
+
+**Ranks** run Bronze, Silver, Gold, Platinum, Diamond and Master, each with divisions I, II and III (300 SR per division), then **Legend** (5400+ SR).
+
+**How SR changes:**
+* **Result:** a win adds 35, a draw adds 5 and a loss takes away 25.
+* **Performance:** up to ±60 more depending on how well you played.
+* **Top of the lobby:** +10.
+* **Skill pull:** a pull toward the SR your skill rating deserves (1500 SR per bot level). Because bots adapt, you win about half your games, so this pull is what lets better players climb.
+* **Leaving early:** a Ranked game you abandon counts as a loss (−60).
+
+**Match grade:** the score from 0 to 1 is made up of:
+* K/D: 32%
+* place in the lobby: 25%
+* kills per minute: 15%
+* win, draw or loss: 18%
+* accuracy: 10%
+
+Grades are S ≥ 0.80, A ≥ 0.65, B ≥ 0.50, C ≥ 0.35, and D below that.
+
+## Adaptive bots (skill algorithm)
+
+Bot difficulty is a continuous level: Recruit 0, Regular 1, Veteran 2, Elite 3 and **Apex 4** (new, above Elite). Fractional levels blend the presets. Bots in the same match vary slightly around the target level so they don't all play alike. After every match:
+
+1. **Performance.** Your performance score *P* (0–1) is computed as described above.
+2. **Skill rating.** Your skill rating *R* (in bot-level units) is updated Elo-style:
+   * Expected performance against bots of level *L*: *E* = 0.5 + 0.3·tanh(1.2·(*R* − *L*)).
+   * Update: *R* += *K*·2.5·(*P* − *E*).
+   * *K* starts high, so new players are placed quickly, then shrinks with experience: *K* = max(0.06, 0.55/√(1 + matches/3)).
+3. **Experience.** How much you play counts as *X* = 1 − e^(−hours/8).
+4. **Bot level.** **Adaptive** bots use level *R* + 0.3·*X*, so regulars face slightly sharper bots. **Ranked** uses the higher of that and a floor that rises with your rank tier.
+
+You can see all of these numbers in **BARRACKS**.
+
+## Skins
+
+**Weapon camos (50).** These are procedural patterns applied to all your guns, in the first-person view and on your character for other players.
+* **Free:** 8 basics (Factory, Desert Tan, Olive Drab, Arctic, Woodland, Urban Digital, Navy Digital, Crimson).
+* **Earned in Ranked:** the other 42, for:
+  * games played
+  * wins
+  * A and S grades
+  * reaching rank tiers (Bronze III up to Legend)
+  * ranked kills and headshots
+  * win streaks
+  * finishing top of the lobby
+* **Animated mastery camos:** a few are animated (for example Gilded, Diamond, Dark Plasma, Singularity, Prism and Aurora). They come from the highest ranks and achievements.
+
+**Operator outfits (12).** These change headgear, visor, vest, pads and masks. Your team colour always stays on the torso, arms, legs and headgear, so teams remain easy to tell apart.
+* **Free:** 8 outfits.
+* **Earned:**
+  * Ghost: reach level 10.
+  * Marksman: 100 headshot kills.
+  * Elite Guard: reach Diamond.
+  * Warlord: 25 ranked wins.
+
+Bots wear random skins. Online, everyone sees each other's equipped skins.
+
+## Progress and saving
+
+The following are saved after every match:
+* level and XP
+* career stats
+* skill rating
+* Ranked SR and history
+* unlocks
+* equipped skins
+
+Each save goes to **both cookies and browser storage** (localStorage), and the newer copy is loaded. Some browsers (Chrome, Edge) ignore cookies on pages opened directly from a file (`file://`), so browser storage keeps your progress there. **BARRACKS** shows which storage works in your browser.
+
+To move your progress to another browser or device, use **BARRACKS → Backup code**. Copy the code, then use **Load a code** on the other device.
+
 ## Weapons
 
 Pistol, SMG, rifle, shotgun, LMG, DMR and sniper. Each weapon has its own fire rate, damage falloff, headshot multiplier, spread (hip, ADS, moving and in the air), recoil, magazine size and reload time, ADS zoom and movement speed. All of these values are in one data table: `src/shared/weapons.js`.
@@ -180,7 +281,7 @@ Bots send the same input commands as human players, so they move, aim and shoot 
 4. **Aim:** human-like aiming with reaction time, an error cone that settles over time, tracking lag and trigger discipline. Shots come in bursts and range limits depend on the weapon.
 5. **Modes:** bots play the objectives. They capture and hold zones in Domination and rush the players in Horde.
 
-Difficulty: **Easy / Normal / Hard / Elite**. It scales reaction time, accuracy, tracking, detection speed, FOV, hearing and aggression.
+Difficulty: **Recruit / Regular / Veteran / Elite / Apex**, or **Adaptive**, which sets a continuous level from your skill (see above). It scales reaction time, accuracy, tracking, detection speed, FOV, hearing and aggression.
 
 ## Networking
 
@@ -214,11 +315,23 @@ web/
    │  ├─ nav.js             # 2.5D nav grid + A* + path smoothing
    │  ├─ bots.js            # bot brain: perception, FSM, steering, aim
    │  ├─ modes.js           # TDM / DOM / FFA / Gun Game / Elimination / Horde
+   │  ├─ difficulty.js      # continuous bot levels (blends Recruit..Apex presets)
+   │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
    │  └─ host.js            # fixed-tick match host, client bindings, network messages
    └─ client/               # browser only
-      ├─ main.js            # entry: menu ↔ session
-      ├─ menu.js            # offline setup / host & join by code / settings / controls
+      ├─ main.js            # entry: menu ↔ session, Ranked and adaptive-difficulty setup
+      ├─ menu.js            # CoD-style menu: Play, Ranked, Online, Armory, Barracks, Settings
+      ├─ profile.js         # level/XP, stats, skill rating algorithm, Ranked SR, unlocks
+      ├─ storage.js         # saves to cookies + localStorage, backup codes
+      ├─ ui/emblems.js      # rank emblems and level badges (SVG)
+      ├─ gfx/textures.js    # procedural surfaces + normal maps, the 50 camo patterns
+      ├─ gfx/models.js      # detailed guns (sights, camos), operators (outfits), first-person arms
+      ├─ gfx/sky.js         # physically based sky (baked to a cube map) + environment lighting, night sky
+      ├─ gfx/post.js        # bloom, ambient occlusion, colour grading, anti-aliasing
+      ├─ gfx/effects.js     # tracers, sparks, smoke, bullet holes, shell casings, muzzle lights
+      ├─ gfx/foliage.js     # grass, forest, industrial skyline, street lamps
+      ├─ gfx/showcase.js    # live 3D operator / weapon backdrop for the menu
       ├─ session.js         # prediction, reconciliation, interpolation, game loop
       ├─ net.js             # LocalTransport (offline), HostTransport & JoinTransport (WebRTC via PeerJS)
       ├─ renderer.js        # Three.js scene, characters, view model, effects
@@ -235,6 +348,11 @@ web/
 
 ## Notes
 
-* Rendering uses merged geometry per material, procedural textures, shadow mapping and pooled effects. The **Quality** setting adjusts pixel ratio, antialiasing and shadows.
+* **Graphics quality presets:**
+  * **Low:** no post effects, shadows, reflections or foliage. For weak devices.
+  * **Medium:** bloom, FXAA, grading, foliage and shadows. The default on phones.
+  * **High:** adds ambient occlusion, 4× MSAA, 4K shadow maps and denser foliage.
+* **Dynamic resolution** (on by default) lowers the internal resolution while the frame rate is low and raises it again when there is headroom.
+* The UI font (Barlow Condensed, SIL Open Font License) is embedded in the file, so it works offline.
 * Every texture and sound is generated at runtime. There are no asset files.
 * After editing anything in `src/`, run `npm run build` to regenerate `dist/VANGUARD.html`.

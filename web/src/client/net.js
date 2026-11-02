@@ -24,8 +24,9 @@ const ICE_SERVERS = [
 // Offline
 // ------------------------------------------------------------------------------------------------
 export class LocalTransport {
-  constructor(config, name, loadout) {
+  constructor(config, name, loadout, cosmetics) {
     this.offline = true;
+    this.cosmetics = cosmetics;
     this.isHost = true;
     this.onMessage = null;
     this.name = name;
@@ -45,7 +46,7 @@ export class LocalTransport {
 
   /** Joins the local match; the welcome message is delivered synchronously. */
   start() {
-    this.host.join('local', this.name, this.loadout);
+    this.host.join('local', this.name, this.loadout, this.cosmetics);
   }
 
   setHandler(fn) {
@@ -205,7 +206,8 @@ function startTicker(fn) {
 // Online host: runs the match in this tab and accepts players by room code
 // ------------------------------------------------------------------------------------------------
 export class HostTransport {
-  constructor(config, name, loadout) {
+  constructor(config, name, loadout, cosmetics) {
+    this.cosmetics = cosmetics;
     this.offline = false;
     this.isHost = true;
     this.code = '';
@@ -295,7 +297,7 @@ export class HostTransport {
 
   /** Joins the host's own player; the welcome message is delivered synchronously into the inbox. */
   start() {
-    this.host.join('host', this.name, this.loadout);
+    this.host.join('host', this.name, this.loadout, this.cosmetics);
     this.lastTick = performance.now();
     this.stopTicker = startTicker(() => this.tick());
   }
@@ -352,7 +354,8 @@ export class HostTransport {
       }
       remote.joined = true;
       const loadout = Array.isArray(msg.loadout) ? msg.loadout.slice(0, 2).map(String) : ['rifle', 'pistol'];
-      this.host.join(clientId, msg.name, loadout);
+      const look = msg.cosmetics && typeof msg.cosmetics === 'object' ? { camo: String(msg.cosmetics.camo || ''), outfit: String(msg.cosmetics.outfit || '') } : null;
+      this.host.join(clientId, msg.name, loadout, look);
       return;
     }
     if (msg.type === 'leave') { this.drop(clientId); return; }
@@ -446,7 +449,7 @@ export class JoinTransport {
   }
 
   /** Connects to the match with the given code. Resolves with the host's welcome message. */
-  connect(code, name, loadout) {
+  connect(code, name, loadout, cosmetics) {
     this.code = code;
     return new Promise((resolve, reject) => {
       if (!webrtcSupported()) { reject(new Error(peerErrorMessage({ type: 'browser-incompatible' }))); return; }
@@ -485,7 +488,7 @@ export class JoinTransport {
           watchLink(conn, () => { if (!settled) fail('Lost the connection to the host while joining.'); else this.lost('Lost connection to the host.'); });
           this.snap = openSnapChannel(conn);
           if (this.snap) this.snap.onmessage = (e) => this.receive(e.data);
-          conn.send(JSON.stringify({ type: 'hello', v: PROTOCOL_VERSION, name, loadout }));
+          conn.send(JSON.stringify({ type: 'hello', v: PROTOCOL_VERSION, name, loadout, cosmetics }));
         });
         conn.on('data', (data) => {
           let msg;

@@ -4,7 +4,8 @@
 // Layers: perception (vision cone + LOS raycasts with awareness, hearing, suppression) -> decision (priority
 // rules evaluated every few hundred ms) -> state behaviour (patrol / investigate / engage / cover / reload /
 // flank / search) -> steering (A* path following, strafing) + human-like aim and trigger discipline.
-import { BTN, DIFFICULTY, MOVE, TICK_DT } from './constants.js';
+import { BTN, MOVE, TICK_DT } from './constants.js';
+import { resolveDifficulty } from './difficulty.js';
 import { DEG, angleDiff, clamp, dist2, dist3, distToSegment, moveTowardsAngle, anglesFromDir } from './math.js';
 import { eyeHeightOf } from './movement.js';
 import { WEAPONS, activeWeapon, canReload } from './weapons.js';
@@ -25,8 +26,8 @@ export class BotBrain {
   }
 
   setDifficulty(key) {
-    this.diffKey = DIFFICULTY[key] ? key : 'normal';
-    this.d = DIFFICULTY[this.diffKey];
+    this.diffKey = key;
+    this.d = resolveDifficulty(key);
   }
 
   reset() {

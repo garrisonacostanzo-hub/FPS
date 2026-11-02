@@ -20,6 +20,7 @@ export const DEFAULTS = {
   crosshairTargetColor: true,   // crosshair turns red on enemies, blue on teammates
   cameraBob: true,       // head bob and screen shake
   renderScale: 1,        // fraction of the quality preset's resolution
+  dynamicResolution: true, // lower the resolution automatically while the frame rate is low
   quality: coarsePointer() ? 'medium' : 'high', // phones/tablets default to a lighter renderer
   primary: 'rifle',
   toggleCrouch: false,
@@ -41,12 +42,12 @@ export const DEFAULTS = {
   mode: 'tdm',
   map: 'outpost',
   bots: 9,
-  difficulty: 'normal',
+  difficulty: 'adaptive',
   // Online host setup.
   hostMode: 'tdm',
   hostMap: 'outpost',
   hostBots: 6,
-  hostDifficulty: 'normal',
+  hostDifficulty: 'adaptive',
 };
 
 function coarsePointer() {

@@ -323,6 +323,8 @@ class Horde extends BaseMode {
   respawnDelay(entity) { return entity.isBot ? 12 : 999; }
 
   waveDifficulty() {
+    const base = this.game.config.difficulty;
+    if (typeof base === 'number') return Math.max(0, Math.min(4, base - 1.2 + this.wave * 0.22)); // adaptive
     if (this.wave >= 9) return 'elite';
     if (this.wave >= 6) return 'hard';
     if (this.wave >= 3) return 'normal';

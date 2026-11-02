@@ -13,6 +13,8 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { GameRenderer } from './renderer.js';
 import { onSettingsChanged, saveSettings, settings } from './settings.js';
+import { difficultyLevel } from '../shared/difficulty.js';
+import { profile, recordMatch } from './profile.js';
 import { TeamPalette } from './teamcolors.js';
 import { TouchControls, enterMobileFullscreen, touchControlsWanted } from './touch.js';
 
@@ -21,8 +23,9 @@ const TOUCH_LOOK = 0.0058;          // radians per CSS pixel of finger drag at s
 const ASSIST_CONE = 4.5 * Math.PI / 180;
 
 export class ClientSession {
-  constructor({ transport, welcome, canvas, hudRoot, audio, onExit }) {
+  constructor({ transport, welcome, canvas, hudRoot, audio, onExit, requeueRanked }) {
     this.transport = transport;
+    this.requeueRanked = requeueRanked;
     this.audio = audio;
     this.onExit = onExit;
     this.myId = welcome.id;
@@ -30,6 +33,9 @@ export class ClientSession {
     this.modeInfo = MODE_LIST.find((m) => m.id === welcome.mode) || MODE_LIST[0];
     this.teams = this.modeInfo.teams;
     this.config = welcome.cfg;
+    this.ranked = !!(welcome.cfg && welcome.cfg.ranked);
+    this.botLevel = difficultyLevel(welcome.cfg ? welcome.cfg.difficulty : 'normal');
+    this.resetMatchStats();
     this.offline = transport.offline;
     this.isHost = !this.offline && !!transport.isHost;
     this.roomCode = transport.code || '';
@@ -42,11 +48,14 @@ export class ClientSession {
     for (const z of this.map.zones) z.y = this.world.surfaceHeight(z.x, z.z, 3);
 
     this.renderer = new GameRenderer(canvas);
+    this.renderer.world = this.world;
     this.renderer.loadMap(this.map, this.modeId === 'dom');
     this.input = new Input(canvas);
     this.input.onLockChange = (locked) => this.onLockChange(locked);
     this.palette = new TeamPalette();
     this.renderer.teamColor = (team) => this.palette.team(team);
+    this.renderer.setLocalLook({ camo: profile.equipped.camo, outfit: profile.equipped.outfit, color: this.palette.colors.ally });
+    this.damageFx = 0;
     this.losCache = new Map();
     this.crosshairAlly = null;
     this.hud = new Hud(hudRoot, {
@@ -148,6 +157,7 @@ export class ClientSession {
         this.rtt = Math.round(performance.now() - msg.t);
         return undefined;
       case 'restart':
+        this.resetMatchStats();
         this.ended = false;
         this.hud.hideEnd();
         this.snapYaw = true;
@@ -168,10 +178,10 @@ export class ClientSession {
 
   applyRoster(list) {
     const seen = new Set();
-    for (const [id, name, team, isBot] of list) {
+    for (const [id, name, team, isBot, camo, outfit] of list) {
       seen.add(id);
       const prev = this.roster.get(id);
-      this.roster.set(id, { id, name, team, isBot: isBot === 1, tier: prev ? prev.tier : 0 });
+      this.roster.set(id, { id, name, team, isBot: isBot === 1, tier: prev ? prev.tier : 0, camo, outfit });
       if (id === this.myId) this.myTeam = team;
     }
     for (const id of [...this.roster.keys()]) if (!seen.has(id)) { this.roster.delete(id); this.renderer.removeCharacter(id); }
@@ -196,7 +206,7 @@ export class ClientSession {
       this.phase = snap.m.ph;
       if (this.phase === 'live' && this.ended) { this.ended = false; this.hud.hideEnd(); }
     }
-    if (snap.m.res && !this.ended && snap.m.ph === 'ended') this.showEnd(snap.m.res[2], snap.m.res[0]);
+    if (snap.m.res && !this.ended && snap.m.ph === 'ended') this.showEnd(snap.m.res[2], snap.m.res[0], snap.m.res[1]);
 
     if (snap.you) this.reconcile(snap.you, snap.ack);
   }
@@ -265,6 +275,7 @@ export class ClientSession {
         this.hud.hitmarker(ev.hs === 1, ev.k === 1);
         if (ev.k) this.audio.kill(); else this.audio.hit(ev.hs === 1);
         this.vibrate(ev.k ? 45 : 12);
+        if (this.match) this.match.hits++;
         return;
       case 'dmg': {
         const m = this.actor.motor;
@@ -272,6 +283,7 @@ export class ClientSession {
         this.hud.damageIndicator(this.viewYaw - toSource);
         this.audio.hurt();
         this.vibrate(35);
+        this.damageFx = Math.min(1, this.damageFx + ev.d / 45);
         if (settings.cameraBob) this.shake = Math.min(1.2, this.shake + ev.d / 40);
         return;
       }
@@ -280,6 +292,15 @@ export class ClientSession {
         this.hud.killfeed(killer ? killer.name : '', victim ? victim.name : '?', ev.w, ev.hs === 1,
           this.palette.entity(ev.k, killer ? killer.team : TEAM.NONE), this.palette.entity(ev.v, victim ? victim.team : TEAM.NONE), ev.k === this.myId || ev.v === this.myId);
         if (ev.k === this.myId && ev.v !== this.myId) this.hud.streak(ev.st);
+        if (this.match && this.phase === 'live') {
+          if (ev.k === this.myId && ev.v !== this.myId) {
+            this.match.kills++;
+            this.match.streak++;
+            this.match.bestStreak = Math.max(this.match.bestStreak, this.match.streak);
+            if (ev.hs === 1) this.match.headshots++;
+          }
+          if (ev.v === this.myId) { this.match.deaths++; this.match.streak = 0; }
+        }
         return;
       }
       case 'died': {
@@ -302,7 +323,7 @@ export class ClientSession {
         this.audio.capture();
         return;
       case 'end':
-        this.showEnd(ev.text, ev.team);
+        this.showEnd(ev.text, ev.team, ev.winner);
         return;
       case 'chat': {
         const r = this.roster.get(ev.id);
@@ -316,12 +337,45 @@ export class ClientSession {
     }
   }
 
-  showEnd(text, team) {
+  showEnd(text, team, winner = -1) {
     if (this.ended) return;
     this.ended = true;
     this.input.releaseLock();
     this.hud.showPause(false);
-    this.hud.showEnd(text, team, this.roster, this.scores, this.myId, this.teams, this.offline);
+    const report = this.recordMatchResult(team, winner, false);
+    this.hud.showEnd(text, team, this.roster, this.scores, this.myId, this.teams, this.offline, report, this.ranked);
+  }
+
+  // ==============================================================================================
+  // Match stats -> profile (XP, skill rating for adaptive bots, Ranked SR, unlocks)
+  // ==============================================================================================
+  resetMatchStats() {
+    this.match = { shots: 0, hits: 0, headshots: 0, kills: 0, deaths: 0, seconds: 0, streak: 0, bestStreak: 0, recorded: false };
+  }
+
+  recordMatchResult(team, winner, abandoned) {
+    if (!this.match || this.match.recorded) return null;
+    this.match.recorded = true;
+    const mine = this.scores.get(this.myId) || { kills: 0, deaths: 0, score: 0 };
+    let result;
+    if (abandoned) result = 'loss';
+    else if (this.teams) result = team === TEAM.NONE ? 'draw' : team === this.myTeam ? 'win' : 'loss';
+    else result = winner === this.myId ? 'win' : winner === -1 || winner === undefined ? 'draw' : 'loss';
+    const rows = [...this.roster.values()].map((r) => ({ id: r.id, s: this.scores.get(r.id) || { score: 0, kills: 0, tier: 0 } }));
+    rows.sort((a, b) => (this.modeId === 'gungame' ? b.s.tier - a.s.tier || b.s.kills - a.s.kills : b.s.score - a.s.score || b.s.kills - a.s.kills));
+    const place = rows.findIndex((r) => r.id === this.myId) + 1 || rows.length;
+    try {
+      return recordMatch({
+        ranked: this.ranked, mode: this.modeId,
+        kills: Math.max(mine.kills, this.match.kills), deaths: Math.max(mine.deaths, this.match.deaths),
+        headshots: this.match.headshots, shots: this.match.shots, hits: this.match.hits,
+        score: mine.score || this.match.kills * 100, seconds: this.match.seconds,
+        result, place, players: rows.length, botLevel: this.botLevel, bestStreak: this.match.bestStreak, abandoned,
+      });
+    } catch (err) {
+      console.error('Could not record match', err);
+      return null;
+    }
   }
 
   // ==============================================================================================
@@ -346,7 +400,15 @@ export class ClientSession {
   }
 
   playAgain() {
+    // Ranked: a fresh game with a new random map and bots re-tuned to the updated skill and rank.
+    if (this.ranked && this.requeueRanked) {
+      const requeue = this.requeueRanked;
+      this.leave();
+      requeue();
+      return;
+    }
     if (this.offline && this.transport.restart) {
+      this.resetMatchStats();
       this.transport.restart();
       this.ended = false;
       this.hud.hideEnd();
@@ -356,6 +418,8 @@ export class ClientSession {
 
   leave() {
     if (!this.running) return;
+    // Leaving a match part-way still counts (an abandoned Ranked game is a loss).
+    if (!this.ended && this.phase === 'live' && this.match && this.match.seconds > 20) this.recordMatchResult(TEAM.NONE, -1, true);
     this.running = false;
     cancelAnimationFrame(this.frameHandle);
     window.removeEventListener('pointerdown', this._pointerKind, true);
@@ -377,6 +441,7 @@ export class ClientSession {
     const dt = Math.min(0.1, (t - this.lastFrame) / 1000);
     this.lastFrame = t;
 
+    if (this.phase === 'live' && !this.ended && this.match) this.match.seconds += dt;
     // Offline: advance the in-browser authoritative host first.
     this.transport.update(dt);
     if (!this.running) return;
@@ -605,6 +670,7 @@ export class ClientSession {
 
     this.renderer.viewModelFire();
     this.audio.gunshot(w.id, null, true);
+    if (this.match) this.match.shots++;
     const muzzle = this.renderer.muzzleWorldPosition(new THREE.Vector3());
     this.renderer.muzzleLight(muzzle);
 
@@ -663,7 +729,7 @@ export class ClientSession {
       const color = this.palette.entity(id, info.team);
       const label = ally && settings.allyMarkers ? info.name : null;
       const marker = ally ? settings.allyMarkers : settings.enemyMarkers && this.enemyInSight(id, pose);
-      const speed = this.renderer.syncCharacter(id, { team: info.team, weapon: pose.weapon, color, ally, outline: settings.outlines }, pose, dt, label, color, marker);
+      const speed = this.renderer.syncCharacter(id, { team: info.team, weapon: pose.weapon, color, ally, outline: settings.outlines, camo: info.camo, outfit: info.outfit }, pose, dt, label, color, marker);
       // Remote footsteps.
       if (pose.alive && speed > 1.2) {
         const stride = (this.strides.get(id) || 0) + speed * dt;
@@ -691,6 +757,10 @@ export class ClientSession {
 
     const w = activeWeapon(this.actor.ws);
     const speed = Math.hypot(m.vx, m.vz);
+    this.damageFx = Math.max(0, this.damageFx - dt * 1.2);
+    const lowHealth = this.actor.alive ? Math.max(0, (40 - this.hp) / 40) * 0.5 : 0;
+    this.renderer.setDamage(Math.min(1, this.damageFx * 0.8 + lowHealth));
+    this.hud.setScope(w.id === 'sniper' && this.actor.alive && this.actor.aim01 > 0.92);
     let fov = settings.fov + (m.sprinting && speed > 1 ? 6 : 0);
     fov = lerp(fov, w.adsFov * (settings.fov / 80), this.actor.aim01);
     cam.fov += (fov - cam.fov) * Math.min(1, dt * 14);

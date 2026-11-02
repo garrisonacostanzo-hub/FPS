@@ -22,8 +22,8 @@ export class GameHost {
 
   get playerCount() { return this.clients.size; }
 
-  join(clientId, name, loadout) {
-    const entity = this.game.addHuman(clientId, sanitizeName(name), loadout);
+  join(clientId, name, loadout, cosmetics) {
+    const entity = this.game.addHuman(clientId, sanitizeName(name), loadout, cosmetics);
     this.clients.set(clientId, { entityId: entity.id, name: entity.name });
     this.send(clientId, {
       type: 'welcome',

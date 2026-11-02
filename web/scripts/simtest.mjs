@@ -26,7 +26,8 @@ for (const mode of MODE_LIST) {
   for (const map of MAP_LIST) {
     const messages = { snap: 0, ev: 0 };
     let kills = 0, captures = 0, ended = null, shots = 0;
-    const host = new GameHost({ mode: mode.id, map: map.id, bots: 9, difficulty: 'hard' }, {
+    const difficulty = (mode.id.length + map.id.length) % 2 ? 'hard' : 2.6; // presets and adaptive levels
+    const host = new GameHost({ mode: mode.id, map: map.id, bots: 9, difficulty }, {
       snapshotRate: 20,
       send: (_id, msg) => {
         messages[msg.type] = (messages[msg.type] || 0) + 1;
