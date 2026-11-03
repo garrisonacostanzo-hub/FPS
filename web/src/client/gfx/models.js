@@ -120,6 +120,71 @@ const FLASH_TEXTURE = (() => {
   };
 })();
 
+const RETICLE_STYLE = { rifle: 'dot', smg: 'holo', shotgun: 'holo', lmg: 'chevron' };
+const reticleTextures = new Map();
+
+/** Reticle drawn on a canvas: 'dot' (red dot), 'holo' (ring + dot) or 'chevron'. White, tinted by the material. */
+function reticleTexture(style) {
+  if (reticleTextures.has(style)) return reticleTextures.get(style);
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.strokeStyle = '#fff';
+  g.shadowColor = '#fff';
+  g.shadowBlur = 6;
+  const dot = (r) => { g.beginPath(); g.arc(64, 64, r, 0, Math.PI * 2); g.fill(); };
+  if (style === 'holo') {
+    g.lineWidth = 5;
+    g.beginPath(); g.arc(64, 64, 44, 0, Math.PI * 2); g.stroke();
+    for (const [x, y, w, h] of [[61, 12, 6, 12], [61, 104, 6, 12], [12, 61, 12, 6], [104, 61, 12, 6]]) g.fillRect(x, y, w, h);
+    dot(5);
+  } else if (style === 'chevron') {
+    g.lineWidth = 6;
+    g.lineJoin = 'miter';
+    g.beginPath(); g.moveTo(44, 84); g.lineTo(64, 62); g.lineTo(84, 84); g.stroke();
+    g.fillRect(61, 92, 6, 4); g.fillRect(61, 104, 6, 4);
+  } else {
+    dot(11);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  reticleTextures.set(style, tex);
+  return tex;
+}
+
+/** Builds the reflex sight on the gun's top rail. Returns the sight-line point (window centre). */
+function reflexSight(g, W, H, L, metal, style, detailed) {
+  const winW = W * 1.25, winH = H * 0.8, t = W * 0.07, depth = L * 0.045;
+  const rail = H * 0.62;
+  const cy = rail + H * 0.16 + t + winH / 2;
+  const cz = -L * 0.06;
+  add(g, rbox(W * 0.62, H * 0.16, depth * 2.4, 0.3), metal, 0, rail + H * 0.08, cz);                       // mount
+  add(g, rbox(winW + t * 2, t, depth), metal, 0, cy - winH / 2 - t / 2, cz);                                 // bottom
+  add(g, rbox(winW + t * 2, t * 1.4, depth * 2.2), metal, 0, cy + winH / 2 + t * 0.7, cz - depth * 0.5);     // hood
+  add(g, rbox(t, winH, depth), metal, -(winW / 2 + t / 2), cy, cz);                                         // left
+  add(g, rbox(t, winH, depth), metal, winW / 2 + t / 2, cy, cz);                                            // right
+  if (detailed) add(g, rbox(t * 1.2, t * 1.6, depth * 0.6), metal, winW / 2 + t * 1.4, cy + winH * 0.15, cz); // brightness knob
+  // Front glass: barely tinted, with a faint coating reflection.
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(winW, winH), new THREE.MeshStandardMaterial({
+    color: 0xa8dcff, transparent: true, opacity: 0.05, roughness: 0.05, metalness: 0.3, depthWrite: false, side: THREE.DoubleSide,
+  }));
+  glass.position.set(0, cy, cz - depth * 0.45);
+  glass.renderOrder = 1;
+  g.add(glass);
+  if (detailed) {
+    // The reticle: HDR red so it glows, additive so the world shows through around it.
+    const size = Math.min(winW, winH) * (style === 'dot' ? 0.3 : 0.62);
+    const reticle = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({
+      map: reticleTexture(style), color: new THREE.Color(3.2, 0.35, 0.28), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    reticle.position.set(0, cy, cz - depth * 0.4);
+    reticle.renderOrder = 2;
+    g.add(reticle);
+  }
+  return { sightY: cy, sightZ: cz };
+}
+
 /**
  * Gun model. Muzzle points to -Z. userData: muzzle (Object3D), flash (Sprite), sightY / sightZ (for aiming down sights).
  * @param {string} weaponId
@@ -177,17 +242,11 @@ export function buildGun(weaponId, scale = 1, camoId = 'default', detailed = tru
     g.add(lens);
     sightZ = -L * 0.05;
   } else if (!pistol) {
-    // Red-dot sight.
-    const hy = H * 0.62 + H * 0.38;
-    add(g, rbox(W * 0.85, H * 0.5, L * 0.13, 0.3), metal, 0, hy, -L * 0.02);
-    const dot = new THREE.Mesh(sphere(W * 0.045), new THREE.MeshBasicMaterial({ color: 0xff2020 }));
-    dot.position.set(0, hy + H * 0.06, -L * 0.07);
-    g.add(dot);
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.7, H * 0.36), new THREE.MeshStandardMaterial({ color: 0x88ccff, transparent: true, opacity: 0.18, roughness: 0.05, metalness: 0.9 }));
-    glass.position.set(0, hy + H * 0.06, -L * 0.06);
-    g.add(glass);
-    sightY = hy + H * 0.06;
-    sightZ = -L * 0.07;
+    // Open reflex / holographic sight: a thin frame around clear glass with a glowing reticle, so you look
+    // straight through it when aiming down sights.
+    const r = reflexSight(g, W, H, L, metal, RETICLE_STYLE[weaponId] || 'dot', detailed);
+    sightY = r.sightY;
+    sightZ = r.sightZ;
   } else {
     add(g, rbox(W * 0.3, H * 0.15, W * 0.3), metal, 0, H * 0.5, -L * 0.52);
     add(g, rbox(W * 0.7, H * 0.15, W * 0.3), metal, 0, H * 0.5, L * 0.25);

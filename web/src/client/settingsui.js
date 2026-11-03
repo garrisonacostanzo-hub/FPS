@@ -12,7 +12,7 @@ export const SETTINGS_SECTIONS = [
     touch: true,
     items: [
       { k: 'touchControls', label: 'On-screen controls', type: 'select', options: [['auto', 'Auto'], ['on', 'Always on'], ['off', 'Off']], hint: 'Auto shows them as soon as you touch the screen.' },
-      { k: 'aimButton', label: 'AIM button', type: 'select', options: [['hold', 'Hold'], ['toggle', 'Tap to toggle']], hint: 'Hold: aim while your thumb is on AIM, and drag it to look around. It never fires.' },
+      { k: 'aimButton', label: 'AIM button', type: 'select', options: [['toggle', 'Tap to toggle scope'], ['hold', 'Hold']], hint: 'Toggle: tap AIM to scope in and again to scope out (drag after tapping to look around). Hold: aim while your thumb is on AIM. It never fires.' },
       { k: 'autoFire', label: 'Auto-fire', type: 'select', options: [['off', 'Off'], ['hip', 'Not while aiming'], ['always', 'Always']], hint: 'Shoots by itself when an enemy is in your crosshair.' },
       { k: 'aimAssist', label: 'Aim assist (slower look while on a target)', type: 'check' },
       { k: 'touchSensitivity', label: 'Look speed', type: 'range', min: 0.3, max: 3, step: 0.05 },
@@ -43,7 +43,7 @@ export const SETTINGS_SECTIONS = [
     items: [
       { k: 'sensitivity', label: 'Mouse sensitivity', type: 'range', min: 0.1, max: 4, step: 0.05 },
       { k: 'adsSensitivity', label: 'Mouse sensitivity while aiming', type: 'range', min: 0.2, max: 1.5, step: 0.05 },
-      { k: 'toggleAim', label: 'Right mouse toggles aim (instead of hold)', type: 'check' },
+      { k: 'toggleAim', label: 'Toggle scope: right-click to aim, right-click again to stop (off = hold right mouse)', type: 'check' },
       { k: 'toggleCrouch', label: 'Crouch key toggles (instead of hold)', type: 'check' },
     ],
   },

@@ -611,6 +611,7 @@ export class ClientSession {
       if (slot >= 0 && slot < n) sw = slot;
       else if (cycle !== 0 && n > 1) sw = (this.actor.ws.active + cycle + n) % n;
     }
+    this.updateAimToggle(active, sw);
     // Touch auto-fire: shoot while an enemy is in the crosshair (semi-auto guns get a pulsed trigger).
     if (active && this.touchUI.enabled && this.crosshairTarget === 2 && this.autoFireAllowed()) {
       const w = activeWeapon(this.actor.ws);
@@ -630,6 +631,21 @@ export class ClientSession {
       r: active ? input.consume('reload') : false,
       vt: this.estimatedServerTime() - this.interpDelay,
     };
+  }
+
+  /**
+   * Toggle aim (click to scope in, click again to scope out) also scopes out when you die, switch weapons, or start
+   * sprinting. With a sniper or DMR on a keyboard, Shift holds breath instead, so it doesn't cancel the scope.
+   */
+  updateAimToggle(active, switching) {
+    const input = this.input;
+    const sprint = input.sprint;
+    const sprintPressed = sprint && !this.prevSprint;
+    this.prevSprint = sprint;
+    if (!input.aimToggled && !input.touch.aim) return;
+    const w = activeWeapon(this.actor.ws);
+    const breathKey = (w.id === 'sniper' || w.id === 'dmr') && !this.touchUI.enabled;
+    if (!this.actor.alive || this.ended || switching >= 0 || (active && sprintPressed && !breathKey && input.moveZ > 0)) input.cancelAim();
   }
 
   /** Is this enemy visible from the camera (not behind a wall)? Re-checked about 8 times a second per enemy. */
@@ -893,7 +909,9 @@ export class ClientSession {
     this.damageFx = Math.max(0, this.damageFx - dt * 1.2);
     const lowHealth = this.actor.alive ? Math.max(0, (40 - this.hp) / 40) * 0.5 : 0;
     this.renderer.setDamage(Math.min(1, this.damageFx * 0.8 + lowHealth));
-    this.hud.setScope(w.id === 'sniper' && this.actor.alive && this.actor.aim01 > 0.92);
+    // Sniper / DMR: the scope view fades in over the last part of aiming down sights.
+    const scopeKind = this.actor.alive && !this.ended && (w.id === 'sniper' || w.id === 'dmr') ? w.id : null;
+    this.hud.setScope(scopeKind, scopeKind ? clamp((this.actor.aim01 - 0.78) / 0.15, 0, 1) : 0);
     let fov = settings.fov + (m.sprinting && speed > 1 ? 6 : 0);
     fov = lerp(fov, w.adsFov * (settings.fov / 80), this.actor.aim01);
     cam.fov += (fov - cam.fov) * Math.min(1, dt * 14);

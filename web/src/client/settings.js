@@ -24,10 +24,10 @@ export const DEFAULTS = {
   quality: coarsePointer() ? 'medium' : 'high', // phones/tablets default to a lighter renderer
   primary: 'rifle',
   toggleCrouch: false,
-  toggleAim: false,
+  toggleAim: true,       // right mouse: click to scope in, click again to scope out (false = hold)
   // Touch controls (phones/tablets).
   touchControls: 'auto', // 'auto' | 'on' | 'off'
-  aimButton: 'hold',     // 'hold' (aim while held, drag to look) | 'toggle'
+  aimButton: 'toggle',   // 'toggle' (tap to scope in / out, drag to look) | 'hold' (aim while held, drag to look)
   autoFire: 'hip',       // 'off' | 'hip' (not while aiming) | 'always'
   aimAssist: true,
   touchSensitivity: 1.0,
@@ -48,6 +48,7 @@ export const DEFAULTS = {
   hostMap: 'outpost',
   hostBots: 6,
   hostDifficulty: 'adaptive',
+  aimV: 2,               // settings revision: 2 = toggle aim became the default
 };
 
 function coarsePointer() {
@@ -61,6 +62,13 @@ function load() {
     const stored = JSON.parse(localStorage.getItem(KEY) || '{}');
     const merged = { ...DEFAULTS, ...stored };
     if (typeof merged.autoFire === 'boolean') merged.autoFire = merged.autoFire ? 'hip' : 'off'; // older saves
+    // Toggle aim became the default: switch older saves over once (the settings can still switch back to hold).
+    if ((stored.aimV || 0) < 2) {
+      merged.toggleAim = true;
+      merged.aimButton = 'toggle';
+      merged.aimV = 2;
+      try { localStorage.setItem(KEY, JSON.stringify(merged)); } catch { /* storage unavailable */ }
+    }
     if (!merged.name) merged.name = 'Player' + Math.floor(100 + Math.random() * 900);
     return merged;
   } catch {

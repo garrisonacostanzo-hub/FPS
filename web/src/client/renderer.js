@@ -503,7 +503,8 @@ export class GameRenderer {
     // Hip position, and aiming down sights with the sight line on the screen centre.
     const hip = new THREE.Vector3(0.13, -0.13, -0.4);
     const scoped = this.vmWeaponId === 'sniper' || this.vmWeaponId === 'dmr';
-    const ads = new THREE.Vector3(0, -this.vmGun.userData.sightY, scoped ? -0.2 : -0.24);
+    // Red-dot / holo guns come close to the eye so the sight window is big; scoped guns switch to the scope view.
+    const ads = new THREE.Vector3(0, -this.vmGun.userData.sightY, scoped ? -0.2 : this.vmWeaponId === 'pistol' ? -0.24 : -0.17);
     const pos = hip.lerp(ads, aim);
     pos.x += vm.swayX * (1 - aim * 0.7) + Math.sin(vm.bob) * bobScale - 0.06 * vm.sprint;
     pos.y += vm.swayY * (1 - aim * 0.7) + Math.abs(Math.cos(vm.bob)) * bobScale - 0.05 * vm.sprint - 0.12 * reload - 0.3 * equip * equip;
@@ -514,7 +515,8 @@ export class GameRenderer {
       -0.55 * vm.sprint + vm.swayX * 3 * (1 - aim * 0.7),
       0.4 * reload + 0.2 * vm.sprint,
     );
-    this.vmGun.visible = state.alive && !(scoped && this.vmWeaponId === 'sniper' && aim > 0.95);
+    // Sniper and DMR: once fully aimed you look through the scope (HUD scope view), so the gun is hidden.
+    this.vmGun.visible = state.alive && !(scoped && aim > 0.93);
     if (this.vmFlashUntil && now > this.vmFlashUntil) {
       const f = this.vmGun.userData.flash;
       if (f) f.visible = false;

@@ -496,12 +496,20 @@ export class Hud {
     el.querySelector('span').textContent = state.recovering ? 'OUT OF BREATH' : state.holding ? 'HOLDING BREATH' : 'HOLD SHIFT TO STEADY';
   }
 
-  /** Sniper scope overlay while fully aimed. */
-  setScope(on) {
-    if (on === this._scope) return;
-    this._scope = on;
+  /** Scope view while aimed with a scoped gun: kind 'sniper' | 'dmr' | null, amount 0..1 fades it in. */
+  setScope(kind, amount = 1) {
     if (!this.el.scope) this.el.scope = this.root.querySelector('#scope');
-    this.el.scope.style.display = on ? 'block' : 'none';
+    const on = !!kind && amount > 0.01;
+    const key = on ? kind + ':' + amount.toFixed(2) : '';
+    if (key === this._scope) return;
+    this._scope = key;
+    const el = this.el.scope;
+    el.style.display = on ? 'block' : 'none';
+    if (!on) return;
+    el.className = kind;
+    el.style.opacity = amount.toFixed(2);
+    // The lens opens up from slightly smaller as the eye settles behind the scope.
+    el.style.setProperty('--lens-k', (0.86 + 0.14 * amount).toFixed(3));
   }
 
   /** Shows or hides optional HUD parts according to the settings. */
@@ -608,7 +616,27 @@ const TEMPLATE = `
   <div id="crosshair" data-style="cross"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i><i class="ring"></i></div>
   <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
   <div id="ally-tag"></div>
-  <div id="scope"><i class="h"></i><i class="v"></i></div>
+  <div id="scope">
+    <div class="lens"></div>
+    <svg class="ret ret-sniper" viewBox="-100 -100 200 200" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <g fill="#050505">
+        <rect x="-100" y="-0.45" width="200" height="0.9"/><rect x="-0.45" y="-100" width="0.9" height="200"/>
+        <rect x="-100" y="-1.6" width="62" height="3.2"/><rect x="38" y="-1.6" width="62" height="3.2"/>
+        <rect x="-1.6" y="38" width="3.2" height="62"/><rect x="-1.6" y="-100" width="3.2" height="62"/>
+        ${[-30, -20, -10, 10, 20, 30].map((v) => `<circle cx="${v}" cy="0" r="1.1"/><circle cx="0" cy="${v}" r="1.1"/>`).join('')}
+      </g>
+      <circle cx="0" cy="0" r="0.9" fill="#ff2a1a"/>
+    </svg>
+    <svg class="ret ret-dmr" viewBox="-100 -100 200 200" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <g fill="none" stroke="#ff3020" stroke-width="1.6" stroke-linejoin="miter">
+        <path d="M-7 8 L0 0 L7 8"/>
+      </g>
+      <g fill="#ff3020"><rect x="-0.6" y="9" width="1.2" height="36"/>
+        ${[16, 24, 32, 40].map((y, i) => `<rect x="${-(8 - i * 1.6)}" y="${y}" width="${2 * (8 - i * 1.6)}" height="1"/>`).join('')}
+      </g>
+      <g fill="#050505"><rect x="-100" y="-0.5" width="72" height="1"/><rect x="28" y="-0.5" width="72" height="1"/><rect x="-0.5" y="-100" width="1" height="72"/></g>
+    </svg>
+  </div>
   <div id="breath"><span>HOLD SHIFT TO STEADY</span><div class="bar"><i></i></div></div>
   <div id="protect">SPAWN PROTECTION</div>
   <div id="vitals"><div id="team-badge" class="label"></div><div class="label">HEALTH</div><div id="hp-value">100</div><div class="bar"><div id="hp-fill"></div></div></div>

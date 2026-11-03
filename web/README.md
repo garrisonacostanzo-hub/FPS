@@ -114,7 +114,7 @@ The same file has touch controls. They turn on automatically when you touch the 
 | Sprint | Push the joystick far forward, past its ring |
 | Look | Drag anywhere on the right part of the screen |
 | Fire | Big **FIRE** button (keep your thumb on it and drag to aim while shooting), or the small **FIRE** button on the left |
-| Aim down sights | **Hold AIM**. Drag your thumb on it to look around while aiming. It never fires. (Settings can switch it to tap-to-toggle.) |
+| Aim down sights | **Tap AIM** to scope in and tap it again to scope out. Drag your thumb after tapping to look around. It never fires. (Settings can switch it to hold-to-aim.) |
 | Crouch | **CROUCH** (tap to toggle) |
 | Jump / reload | **JUMP** / **RELOAD** |
 | Switch weapon | Tap the weapon and ammo panel (⇄) |
@@ -123,13 +123,13 @@ The same file has touch controls. They turn on automatically when you touch the 
 **Aiming help** (change it under Settings → Touch controls):
 * **Aim assist** (on by default) slows the look speed while the crosshair is on an enemy.
 * **Auto-fire** shoots while an enemy is in your crosshair, in range and in clear view. It has three settings:
-  * **Not while aiming** (default): it never fires while you hold AIM.
+  * **Not while aiming** (default): it never fires while you're aiming.
   * **Always**.
   * **Off**.
 
 **Touch settings:**
 * On-screen controls: Auto, Always on or Off.
-* AIM button: Hold or Tap to toggle.
+* AIM button: Tap to toggle scope (default) or Hold.
 * Auto-fire and aim assist.
 * Look speed, and a separate look speed while aiming.
 * Move stick: floating or fixed.
@@ -176,7 +176,7 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 | Sprint | `Shift` |
 | Jump | `Space` |
 | Crouch | `Ctrl` / `C` (hold or toggle, set in Settings) |
-| Fire / Aim down sights | Left mouse / Right mouse (hold or toggle) |
+| Fire / Aim down sights | Left mouse / Right mouse: click to scope in, click again to scope out (Settings can switch to hold) |
 | Reload | `R` |
 | Switch weapon | `1` `2`, `Q` `E`, mouse wheel |
 | Scoreboard | `Tab` |
@@ -190,7 +190,7 @@ If the browser or an embedding frame refuses mouse capture (pointer lock), the g
 * **Touch controls:** listed above.
 * **Mouse & keyboard:**
   * Sensitivity, and a separate sensitivity while aiming.
-  * Hold or toggle for aim and crouch.
+  * Toggle (default) or hold for aim, and hold or toggle for crouch.
 * **View & HUD:**
   * Field of view and invert look.
   * Camera bob and screen shake.
@@ -364,6 +364,14 @@ A round that goes through loses damage and speed. Exit holes appear on the far s
 * the muzzle walks side to side in a gun-specific way, with a little randomness
 
 Aiming down sights and crouching tame it, and the view recovers when you stop firing.
+
+**Sights and scopes.** You look through the sight when you aim:
+* **Rifle, SMG, shotgun and LMG** have open reflex and holographic sights: a thin frame around clear glass with a glowing reticle (red dot on the rifle, ring-and-dot holo on the SMG and shotgun, chevron on the LMG).
+* **DMR** switches to a scope view (about 2× zoom) with an illuminated chevron and bullet-drop marks.
+* **Sniper** switches to a high-zoom scope view with a mil-dot crosshair.
+* The **pistol** uses iron sights.
+
+**Toggle scope.** Aiming is a toggle by default: right-click (or tap AIM) to scope in, and again to scope out. You also scope out when you die, switch weapons or start sprinting. With a sniper or DMR on a computer, Shift holds your breath instead of sprinting, so it keeps the scope. To aim only while holding the button, turn off **Toggle scope** (mouse) or set **AIM button** to **Hold** (touch) in Settings.
 
 **Weapon sway.** Aiming down sights drifts in a slow figure-eight:
 * it is strongest on the sniper and DMR, and grows while moving

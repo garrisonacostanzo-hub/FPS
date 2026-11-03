@@ -203,6 +203,12 @@ export class Input {
     return value;
   }
 
+  /** Scopes out of a toggled aim (mouse or touch). */
+  cancelAim() {
+    this.aimToggled = false;
+    this.touch.aim = false;
+  }
+
   resetToggles() {
     this.crouchToggled = false;
     this.aimToggled = false;
