@@ -38,6 +38,13 @@ Some rules:
 * **The match runs in the host's browser.** The host should keep that tab open. Their game keeps running if they switch tabs, but if the host leaves or closes the tab, the match ends for everyone.
 * Players connect directly to the host's browser over WebRTC. The free public [PeerJS](https://peerjs.com) service is used only to find the host from the room code. If a strict network blocks a direct connection, PeerJS's public relay is tried automatically.
 * Online play doesn't work inside sandboxed embeds that block WebRTC (such as Claude's artifact viewer). Open the file directly in a browser.
+* **School and work networks** (and school-managed Chromebooks) often block online games: the matchmaking service, peer-to-peer (WebRTC) connections, or both. Offline play still works there. **ONLINE → CHECK CONNECTION** (also on the FRIENDS tab when you're not online) tests each part and says what's blocked:
+  * whether WebRTC is turned on in the browser
+  * whether the matchmaking service is reachable
+  * whether direct connections are allowed
+  * whether the relay fallback can be reached
+
+  To use online play on a managed network, ask its IT staff to allow `0.peerjs.com` and WebRTC.
 * Advanced: to use your own PeerJS signaling server, open `VANGUARD.html?signal=your-host:9000`. Everyone in a match must use the same server.
 
 ## Friends, squads and Showdown 1v1

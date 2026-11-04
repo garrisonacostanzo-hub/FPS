@@ -589,3 +589,6 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
   .fr-ranks, .fr-equip, .fr-duel { grid-template-columns: 1fr; }
   .toasts { top: auto; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
 }
+.net-check { display: flex; flex-direction: column; gap: 6px; }
+.net-lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 15px; }
+.net-lines .ok { color: #7ee08a; } .net-lines .bad { color: #ff8a80; }

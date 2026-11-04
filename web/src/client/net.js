@@ -14,7 +14,7 @@ export const CODE_LENGTH = 5;
 const SNAP_CHANNEL_ID = 7;          // negotiated unreliable channel for snapshots
 const CLIENT_TIMEOUT = 20;          // host drops a silent client after this many seconds
 const HOST_TIMEOUT = 15;            // client gives up on a silent host after this many seconds
-const ICE_SERVERS = [
+export const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
@@ -112,6 +112,11 @@ export function signalingOptions() {
   return options;
 }
 
+/** The matchmaking server's host name, for messages (the public PeerJS cloud unless ?signal= overrides it). */
+export function signalingHost() {
+  return signalingOptions().host || '0.peerjs.com';
+}
+
 export function createPeer(id) {
   return new Peer(id, signalingOptions());
 }
@@ -141,7 +146,7 @@ function peerErrorMessage(err) {
     case 'server-error':
     case 'socket-error':
     case 'socket-closed':
-      return 'Could not reach the matchmaking service. Check your internet connection and try again.';
+      return 'Could not reach the matchmaking service. Check your internet connection. On a school or work network or Chromebook, online play may be blocked: press CHECK CONNECTION to see what is blocked.';
     case 'ssl-unavailable': return 'Secure connection to the matchmaking service failed.';
     default: return (err && err.message) || 'Connection error.';
   }
@@ -258,7 +263,7 @@ export class HostTransport {
           settled = true;
           unwatch();
           peer.destroy();
-          reject(new Error('The matchmaking service did not answer. Check your internet connection and try again.'));
+          reject(new Error('The matchmaking service did not answer. On a school or work network or Chromebook, online play may be blocked: press CHECK CONNECTION to see what is blocked.'));
         }, 15000);
         peer.on('open', () => {
           if (settled) return;
@@ -464,8 +469,8 @@ export class JoinTransport {
       };
       const unwatch = watchPolicy(fail);
       const timer = setTimeout(() => fail(this.conn && !this.conn.open
-        ? 'Found the match but could not connect to the host. A firewall or strict network may be blocking peer-to-peer connections.'
-        : 'Could not reach the matchmaking service. Check your internet connection and try again.'), 20000);
+        ? 'Found the match but could not connect to the host. A school, work or other strict network may be blocking peer-to-peer connections: press CHECK CONNECTION to see what is blocked.'
+        : 'Could not reach the matchmaking service. On a school or work network or Chromebook, online play may be blocked: press CHECK CONNECTION to see what is blocked.'), 20000);
 
       let peer;
       try {

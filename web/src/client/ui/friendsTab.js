@@ -77,6 +77,7 @@ export const friendsTab = {
             <button class="mini" id="copy-friend-code">COPY</button>
           </div>
           <p class="m-note fr-state ${state === 'online' ? 'ok' : state === 'connecting' ? '' : 'warn'}"><i class="fr-dot ${state === 'online' ? 'on' : ''}"></i>${esc(social.stateText())}</p>
+          ${state === 'online' ? '' : this.renderNetCheck()}
           <div class="m-field"><label>ADD A FRIEND</label>
             <div class="join-row fr-add"><input id="friend-code-input" maxlength="${FRIEND_CODE_LENGTH + 1}" placeholder="ABCD-2345" autocomplete="off" spellcheck="false" value="${esc(this.friendInput || '')}">
               <button class="m-start small" id="friend-add"><b>SEND</b></button></div>

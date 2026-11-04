@@ -8,6 +8,7 @@ import { MODE_LIST, SQUAD_TEAM_SIZE } from '../shared/modes.js';
 import { PRIMARY_WEAPONS, WEAPONS } from '../shared/weapons.js';
 import { camoSwatch } from './gfx/textures.js';
 import { CODE_LENGTH, isEmbedded, normalizeCode, webrtcSupported } from './net.js';
+import { checkConnection, verdictText } from './netcheck.js';
 import {
   adaptiveBotLevel, equip, experience, isCamoUnlocked, isOutfitUnlocked, levelProgress, profile, rankedBotLevel,
   replaceProfile, requirementText, resetProfile, saveProfile,
@@ -176,6 +177,7 @@ export class MainMenu {
     }));
     const binders = { play: () => this.bindPlay(), ranked: () => this.bindRanked(), friends: () => this.bindFriends(), online: () => this.bindOnline(), armory: () => this.bindArmory(), barracks: () => this.bindBarracks(), settings: () => this.bindSettings() };
     if (binders[this.tab]) binders[this.tab]();
+    this.bindNetCheck();
     this.bindSquadBar();
     this.squadSig = this.squadSignature();
     this.rendering = false;
@@ -413,6 +415,7 @@ export class MainMenu {
           <p class="status" id="online-status">${esc(this.status)}</p>
           <p class="m-note">Everyone needs the same VANGUARD.html and an internet connection. Players connect directly to the host's browser; a free public matchmaking service is only used to find the host by code.</p>
           ${warn}
+          ${this.renderNetCheck()}
           ${this.weaponField()}
         </section>
         <section class="m-detail">
@@ -464,6 +467,28 @@ export class MainMenu {
         this.setBusy(false, err.message || String(err));
       }
     });
+  }
+
+  /** CHECK CONNECTION button and its results (Online and Friends tabs). */
+  renderNetCheck() {
+    const c = this.netCheck;
+    const body = !c ? '' : c.running ? '<p class="m-note">Checking… (about 10 seconds)</p>'
+      : `<ul class="net-lines">${c.result.lines.map(([k, t]) => `<li class="${k}">${k === 'ok' ? '✔' : '✖'} ${esc(t)}</li>`).join('')}</ul>
+         <p class="m-note ${c.result.verdict === 'ok' || c.result.verdict === 'relay' ? '' : 'warn'}">${esc(verdictText(c.result))}</p>`;
+    return `<div class="net-check"><div class="m-chips"><button class="net-check-btn" ${c && c.running ? 'disabled' : ''}>CHECK CONNECTION</button></div>${body}</div>`;
+  }
+
+  bindNetCheck() {
+    this.root.querySelectorAll('.net-check-btn').forEach((b) => b.addEventListener('click', async () => {
+      this.click();
+      if (this.netCheck && this.netCheck.running) return;
+      this.netCheck = { running: true, result: null };
+      this.render();
+      let result;
+      try { result = await checkConnection(); } catch (err) { result = { verdict: 'no-signaling', lines: [['bad', String((err && err.message) || err)]] }; }
+      this.netCheck = { running: false, result };
+      if (this.root.style.display !== 'none') this.render();
+    }));
   }
 
   setBusy(busy, status) {

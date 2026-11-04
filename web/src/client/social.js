@@ -196,8 +196,8 @@ class Social {
       case 'reconnecting': return 'Connection to the matchmaking service lost. Reconnecting… (friends already connected stay connected)';
       case 'taken': return 'Your friend code is already online in another tab or on another device. Close it to use friends here (retrying).';
       case 'blocked': return 'This page is open inside a viewer that blocks online connections. Download VANGUARD.html and open it in your browser to use friends.';
-      case 'unsupported': return 'This browser does not support peer-to-peer connections (WebRTC), so friends are unavailable.';
-      case 'error': return 'Could not reach the matchmaking service. Check your internet connection (retrying).';
+      case 'unsupported': return 'Peer-to-peer connections (WebRTC) are unavailable in this browser (on school or work Chromebooks the administrator can turn them off), so friends are unavailable.';
+      case 'error': return 'Could not reach the matchmaking service (retrying). If you are on a school or work network or Chromebook, it may be blocked: press CHECK CONNECTION.';
       default: return 'Offline.';
     }
   }
