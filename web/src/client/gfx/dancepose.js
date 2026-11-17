@@ -13,6 +13,67 @@ const mixArm = (a, b, k) => a.map((v, i) => mix(v, b[i] || 0, k));
 
 const DOWN = [0.05, 0, 0.12, 0.15, 0];
 
+const smooth = (k) => k * k * (3 - 2 * k);
+const mixPose = (a, b, k) => ({
+  y: mix(a.y, b.y, k), lean: mix(a.lean, b.lean, k), yaw: mix(a.yaw, b.yaw, k), roll: mix(a.roll, b.roll, k),
+  head: a.head.map((v, i) => mix(v, b.head[i], k)), L: mixArm(a.L, b.L, k), R: mixArm(a.R, b.R, k),
+  lL: a.lL.map((v, i) => mix(v, b.lL[i], k)), lR: a.lR.map((v, i) => mix(v, b.lR[i], k)),
+});
+/** 1 right on each beat, falling to 0 between beats (claps, pumps). */
+const onBeat = (b) => { const f = b - Math.floor(b); return Math.exp(-f * f * 55) + Math.exp(-(1 - f) * (1 - f) * 55); };
+/** Knees dip on every beat. */
+const dip = (b) => 0.5 + 0.5 * Math.cos(b * TAU);
+
+const CREW = [
+  // 1. Step-touch side to side, clapping in front of the chest on every beat.
+  (b) => {
+    const side = sin(b * Math.PI);
+    const clap = onBeat(b);
+    return {
+      y: -0.05 * dip(b), lean: 0.04, yaw: 0.12 * side, roll: 0.07 * side,
+      head: [0.1 * dip(b), 0.15 * side, 0],
+      L: [1.25, 0, 0.55 - 0.5 * clap, 0.7, 0], R: [1.25, 0, 0.55 - 0.5 * clap, 0.7, 0],
+      lL: [0.05, 0.08 + 0.22 * pos(side), 0.2 + 0.25 * dip(b)], lR: [0.05, 0.08 + 0.22 * pos(-side), 0.2 + 0.25 * dip(b)],
+    };
+  },
+  // 2. Arm roll in front of the chest, swaying the shoulders.
+  (b) => {
+    const r = b * TAU;
+    return {
+      y: -0.04 * dip(b), lean: 0.08, yaw: 0.28 * sin(b * Math.PI * 0.5), roll: 0.05 * sin(b * Math.PI),
+      head: [0.12 * dip(b), -0.15 * sin(b * Math.PI * 0.5), 0],
+      L: [0.95 + 0.3 * sin(r), 0, 0.25, 1.7 + 0.35 * Math.cos(r), 0], R: [0.95 + 0.3 * sin(r + Math.PI), 0, 0.25, 1.7 + 0.35 * Math.cos(r + Math.PI), 0],
+      lL: [0, 0.12, 0.25 + 0.2 * dip(b)], lR: [0, 0.12, 0.25 + 0.2 * dip(b)],
+    };
+  },
+  // 3. Point up to the left, then the right, other hand on the hip, hip pop on each point.
+  (b) => {
+    const k = snap(b);
+    const right = Math.floor(b) % 2 === 1;
+    const point = [2.45, 0, 0.75, 0, 0], hip = [-0.25, 0, 0.6, 1.75, 0];
+    const L = right ? mixArm(point, hip, k) : mixArm(hip, point, k);
+    const R = right ? mixArm(hip, point, k) : mixArm(point, hip, k);
+    const s = right ? mix(1, -1, k) : mix(-1, 1, k);
+    return {
+      y: -0.03 * (1 - k), lean: 0, yaw: -0.3 * s, roll: -0.1 * s,
+      head: [-0.15, -0.35 * s, 0],
+      L, R,
+      lL: [0, 0.12 + 0.12 * pos(-s), 0.15 + 0.2 * pos(s)], lR: [0, 0.12 + 0.12 * pos(s), 0.15 + 0.2 * pos(-s)],
+    };
+  },
+  // 4. Raise the roof: palms push up on the beat while hopping.
+  (b) => {
+    const push = onBeat(b);
+    const hop = pos(sin(b * TAU));
+    return {
+      y: 0.09 * hop - 0.03 * push, lean: -0.05, yaw: 0.15 * sin(b * Math.PI * 0.5), roll: 0,
+      head: [-0.2, 0, 0.12 * sin(b * Math.PI)],
+      L: [2.5 + 0.35 * push, 0, 0.55, 1.4 - 1.1 * push, 0], R: [2.5 + 0.35 * push, 0, 0.55, 1.4 - 1.1 * push, 0],
+      lL: [0.15 * hop, 0.1, 0.2 + 0.55 * hop], lR: [0.15 * hop, 0.1, 0.2 + 0.55 * hop],
+    };
+  },
+];
+
 const POSES = {
   robot(b) {
     const step = Math.floor(b) % 4, prev = (step + 3) % 4, k = snap(b);
@@ -105,14 +166,24 @@ const POSES = {
       lL: [0, 0.1, 0.25 + 0.12 * sin(ph)], lR: [0, 0.1, 0.25 + 0.12 * sin(ph + Math.PI)],
     };
   },
+  // Crew Groove (group dance): a 16-beat routine in four parts, so a crew dancing it together looks rehearsed:
+  // step-touch with claps, arm rolls, point left / right, then raise the roof with hops.
+  crew(b) {
+    const part = Math.floor(b / 4) % 4;
+    const local = b - Math.floor(b / 4) * 4;
+    const p = CREW[part](b);
+    // Blend into the next part over the last quarter beat.
+    if (local < 3.75) return p;
+    return mixPose(p, CREW[(part + 1) % 4](b), smooth((local - 3.75) / 0.25));
+  },
 };
 
 /** Pose for a dance at a time (seconds since it started). */
-export function dancePose(id, seconds, bpm) {
+export function dancePose(id, seconds, bpm, shownFor = seconds) {
   const f = POSES[id] || POSES.robot;
   const p = f((seconds * bpm) / 60);
-  // Ease in over the first 0.3 s from standing.
-  const k = Math.min(1, seconds / 0.3);
+  // Ease in over the first 0.3 s from standing (also when joining a group dance halfway through the routine).
+  const k = Math.min(1, Math.max(0, shownFor) / 0.3);
   if (k >= 1) return p;
   const z = (v) => v * k;
   return {

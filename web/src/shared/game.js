@@ -9,7 +9,7 @@ import { clamp, dirFromAngles, dist2, dist3, distToSegment, makeRng, rayBox, ray
 import { buildMap, generateCoverPoints } from './map.js';
 import { ABILITIES, ABILITY_IDS, CLOAK, GRENADE, PULSE, STIM_HEAL, abilityById } from './abilities.js';
 import { EMOTE_COOLDOWN, EMOTE_IDS } from './emotes.js';
-import { DANCE_IDS, danceIndex } from './dances.js';
+import { DANCE_IDS, JOIN_RADIUS, danceIndex, isGroupDance } from './dances.js';
 import { createMode } from './modes.js';
 import { createMotorState, eyeHeightOf } from './movement.js';
 import { NavGrid } from './nav.js';
@@ -440,6 +440,8 @@ export class Game {
     this.stepBullets(dt);
     if (this.phase !== 'ended') this.updatePickups();
     this.stepAbilities(dt);
+    this.danceCheck = (this.danceCheck || 0) + dt;
+    if (this.danceCheck > 0.5) { this.danceCheck = 0; this.botsJoinDances(); }
     if (this.phase !== 'ended') this.mode.update(dt);
     // Squad and duel matches do not loop: the squad leader / challenger queues the next one from the end screen.
     if (this.phase === 'ended' && this.time >= this.phaseEnd && !this.config.party && !this.config.duel) {
@@ -827,6 +829,39 @@ export class Game {
     if (e) e.dance = null;
   }
 
+  /**
+   * Joins someone's group dance (Q nearby). The joiner copies the dance and its start time, so every member of
+   * the crew is on the same move and the same beat.
+   */
+  joinDance(e, leaderId) {
+    const leader = this.entities.get(leaderId);
+    if (!e || !e.alive || !leader || leader === e || !leader.alive || !leader.dance || !isGroupDance(leader.dance.id)) return false;
+    if (Math.hypot(leader.motor.x - e.motor.x, leader.motor.z - e.motor.z) > JOIN_RADIUS || Math.abs(leader.motor.y - e.motor.y) > 3) return false;
+    if (e.dance && e.dance.start === leader.dance.start && e.dance.id === leader.dance.id) return true;
+    if (this.time - (e.lastDance ?? -9) < 0.5) return false;
+    e.lastDance = this.time;
+    e.dance = { id: leader.dance.id, start: leader.dance.start };
+    return true;
+  }
+
+  /** Idle bots nearby sometimes join a group dance (only when nobody is shooting at them). */
+  botsJoinDances() {
+    for (const leader of this.entities.values()) {
+      if (!leader.alive || !leader.dance || !isGroupDance(leader.dance.id)) continue;
+      for (const bot of this.entities.values()) {
+        if (!bot.isBot || !bot.alive || bot === leader || !bot.brain || (bot.dance && bot.dance.start === leader.dance.start)) continue;
+        if (this.mode.teams && bot.team !== leader.team && this.phase === 'live') continue;
+        if (bot.brain.targetVisible || this.time - (bot.lastDamage ?? -99) < 3) continue;
+        if (Math.hypot(leader.motor.x - bot.motor.x, leader.motor.z - bot.motor.z) > JOIN_RADIUS) continue;
+        const key = `${leader.id}:${leader.dance.start}`;
+        if (bot.brain.crewChecked === key) continue;
+        bot.brain.crewChecked = key; // one roll per bot per crew
+        if (this.rng() > (this.phase === 'live' ? 0.5 : 0.85)) continue;
+        if (this.joinDance(bot, leader.id)) bot.brain.danceUntil = this.time + 6 + this.rng() * 8;
+      }
+    }
+  }
+
   botChat(bot, text) {
     if (this.time - (bot.lastChat ?? -9) < 4) return;
     bot.lastChat = this.time;
@@ -1025,7 +1060,7 @@ export class Game {
       const m = e.motor;
       const flags = (e.alive ? 1 : 0) | (m.sprinting ? 2 : 0) | (e.aim01 > 0.5 ? 4 : 0) | (m.grounded ? 8 : 0) | (e.ws.reloading ? 16 : 0) | (e.cloakUntil > this.time ? 32 : 0);
       const slot = e.ws.slots[e.ws.active];
-      ents.push([e.id, r2(m.x), r2(m.y), r2(m.z), r3(m.yaw), r3(m.pitch), r2(m.crouch), flags, slot ? slot.id : 'pistol', Math.ceil(e.hp), e.dance ? danceIndex(e.dance.id) : 0]);
+      ents.push([e.id, r2(m.x), r2(m.y), r2(m.z), r3(m.yaw), r3(m.pitch), r2(m.crouch), flags, slot ? slot.id : 'pistol', Math.ceil(e.hp), e.dance ? danceIndex(e.dance.id) : 0, e.dance ? r3(e.dance.start) : 0]);
     }
     const snap = { type: 'snap', t: r3(this.time), e: ents, m: this.hudState() };
     if (this.pickups.length) snap.pk = this.pickups.map((p) => [p.id, r2(p.x), r2(p.y), r2(p.z)]);
@@ -1050,6 +1085,7 @@ export class Game {
         a: packActor(forEntity),
         ck: forEntity.cloakUntil > this.time ? r2(forEntity.cloakUntil - this.time) : 0,
         dn: forEntity.dance ? danceIndex(forEntity.dance.id) : 0,
+        ds: forEntity.dance ? r3(forEntity.dance.start) : 0,
       };
     }
     return snap;

@@ -207,7 +207,7 @@ export class Hud {
     const items = page === 'quick' ? EMOTES : DANCES;
     el.querySelector('.ew-items').innerHTML = items.map((em, i) => {
       const a = (i / items.length) * Math.PI * 2;
-      return `<button class="ew-item ${page}" data-emote="${em.id}" style="left:calc(50% + ${(Math.sin(a) * 140).toFixed(1)}px);top:calc(50% - ${(Math.cos(a) * 140).toFixed(1)}px)"><i>${em.icon}</i><b>${esc((em.label || em.name).toUpperCase())}</b></button>`;
+      return `<button class="ew-item ${page}" data-emote="${em.id}" style="left:calc(50% + ${(Math.sin(a) * 140).toFixed(1)}px);top:calc(50% - ${(Math.cos(a) * 140).toFixed(1)}px)"><i>${em.icon}</i><b>${esc((em.label || em.name).toUpperCase())}</b>${em.group ? '<em>GROUP</em>' : ''}</button>`;
     }).join('');
     el.querySelectorAll('[data-wpage]').forEach((b) => b.classList.toggle('on', b.dataset.wpage === page));
     el.querySelector('.ew-center small').textContent = touch ? 'Tap one' : `Point the mouse, let go of ${page === 'quick' ? 'Z' : 'B'} (or click) · scroll to switch`;
@@ -237,10 +237,25 @@ export class Hud {
   }
 
   /** While you dance: what it is and how to stop. */
-  setDanceHint(dance, touch) {
+  setDanceHint(dance, touch, leader = null) {
     const el = this.root.querySelector('#dance-hint');
     if (!dance) { el.classList.remove('show'); return; }
-    el.innerHTML = `<b>${dance.icon} ${esc(dance.name.toUpperCase())}</b><small>${touch ? 'Drag to look around · move or shoot to stop' : 'Mouse to look around · move, jump or shoot to stop'}</small>`;
+    const group = dance.group
+      ? `<em>${leader ? `Dancing with ${esc(leader)}'s crew` : `Group dance · players near you can ${touch ? 'tap 👯 JOIN' : 'press Q'} to join`}</em>`
+      : '';
+    el.innerHTML = `<b>${dance.icon} ${esc(dance.name.toUpperCase())}</b>${group}<small>${touch ? 'Drag to look around · move or shoot to stop' : 'Mouse to look around · move, jump or shoot to stop'}</small>`;
+    el.classList.add('show');
+  }
+
+  /** "Press Q to join NAME's Crew Groove" while someone near you does a group dance. */
+  setJoinHint(info, touch) {
+    const key = info ? `${info.name}|${info.dance ? info.dance.id : ''}|${touch ? 1 : 0}` : '';
+    if (key === this._joinKey) return;
+    this._joinKey = key;
+    const el = this.root.querySelector('#join-hint');
+    if (!info) { el.classList.remove('show'); return; }
+    const d = info.dance || { icon: '👯', name: 'dance' };
+    el.innerHTML = `${touch ? 'Tap <kbd>👯 JOIN</kbd>' : 'Press <kbd>Q</kbd>'} to join <b>${esc(info.name)}</b>'s ${d.icon} ${esc(d.name)}`;
     el.classList.add('show');
   }
 
@@ -833,6 +848,7 @@ const TEMPLATE = `
     <div class="ew-center"><b>EMOTES</b><small></small></div>
   </div>
   <div id="dance-hint"></div>
+  <div id="join-hint"></div>
   <div id="self-emote"></div>
   <div id="ammo"><div id="weapon-name"></div><div class="count"><span id="ammo-mag">30</span><span class="sep">/</span><span id="ammo-reserve">120</span></div><div id="weapon-slots"></div></div>
   <div id="reload-bar"><div id="reload-fill"></div><span>RELOADING</span></div>

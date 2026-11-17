@@ -39,6 +39,7 @@ const BUTTONS = [
   ['chat', '💬', 'top chatbtn'],
   ['talk', '🎙', 'talk'],
   ['ability', '⚡', 'ability'],
+  ['join', '👯<b>JOIN</b>', 'joinbtn'],
   ['pause', 'II', 'top pause'],
 ];
 
@@ -127,6 +128,7 @@ export class TouchControls {
     this.btn.crouch.classList.toggle('on', t.crouch);
     this.btn.score.classList.toggle('on', t.scoreboard);
     this.btn.fire.classList.toggle('auto', !!state.autoFiring);
+    this.btn.join.classList.toggle('show', !!state.joinable);
     if (state.ability) {
       const secs = Math.ceil(state.cooldown || 0);
       const label = `${state.ability.icon}${secs > 0 ? `<i>${secs}</i>` : ''}`;
@@ -160,6 +162,7 @@ export class TouchControls {
       case 'chat': if (this.callbacks.onChat) this.callbacks.onChat(); break;
       case 'talk': t.talk = true; role = 'talk'; break; // push-to-talk while held
       case 'ability': t.ability = true; role = 'ability'; break; // special ability (released on lift)
+      case 'join': this.input.latched.join = true; break; // join the group dance nearby
       default:
         if (e.clientX < window.innerWidth * 0.42 && this.stickId === null) {
           role = 'stick';

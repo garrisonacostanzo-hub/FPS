@@ -11,7 +11,7 @@ export class Input {
     this.mouseButtons = 0;
     this.lookX = 0;
     this.lookY = 0;
-    this.latched = { jump: false, reload: false, slot: -1, cycle: 0, firePressed: false, scoreboard: false, chat: false, teamChat: false, emote: false, quick: false };
+    this.latched = { jump: false, reload: false, slot: -1, cycle: 0, firePressed: false, scoreboard: false, chat: false, teamChat: false, emote: false, quick: false, join: false };
     this.crouchToggled = false;
     this.aimToggled = false;
     this.enabled = true;
@@ -148,7 +148,7 @@ export class Input {
         if (code === 'Digit2') this.latched.slot = 1;
         if (code === 'Digit3') this.latched.slot = 2;
         if (code === 'Digit4') this.latched.slot = 3;
-        if (code === 'KeyQ') this.latched.cycle = -1;
+        if (code === 'KeyQ') { this.latched.cycle = -1; this.latched.join = true; } // Q also joins a group dance nearby
         if (code === 'KeyE') this.latched.cycle = 1;
         if ((code === 'ControlLeft' || code === 'KeyC') && settings.toggleCrouch) this.crouchToggled = !this.crouchToggled;
         if (code === 'KeyT' || code === 'Enter') this.latched.chat = true;

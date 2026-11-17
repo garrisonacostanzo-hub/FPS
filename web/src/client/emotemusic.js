@@ -59,6 +59,13 @@ const SONGS = {
     { inst: 'sine', vol: 0.45, len: 7, notes: 'A1 . . . . . . . . . . . . . . . F1 . . . . . . . . . . . . . . .' },
     { inst: 'keys', vol: 0.12, len: 7.5, notes: 'A3+C4+E4+G4 . . . . . . . C4+E4+G4+B4 . . . . . . . F3+A3+C4+E4 . . . . . . . E3+G3+B3+D4 . . . . . . .' },
   ] },
+  // Crew Groove: a funky four-on-the-floor loop with a call-and-response hook (the group dance).
+  crew: { bpm: 116, tracks: [
+    { inst: 'kick', hits: 'x...x...x...x...' }, { inst: 'clap', hits: '....x.......x...' }, { inst: 'openhat', hits: '..x...x...x...x.' }, { inst: 'hat', hits: 'x.xxx.xxx.xxx.xx' },
+    { inst: 'saw', vol: 0.34, len: 0.8, notes: 'E2 . E3 E2 . . D3 . E2 . E2 G2 . A2 B2 . E2 . E3 E2 . . D3 . G2 . A2 . B2 . D3 .' },
+    { inst: 'pluck', vol: 0.16, len: 0.8, notes: '. . E4+G4+B4 . . . E4+G4+B4 . . . D4+F#4+A4 . . . E4+G4+B4 . . . E4+G4+B4 . . . E4+G4+B4 . . . A3+C4+E4 . . . B3+D4+F#4 .' },
+    { inst: 'square', vol: 0.12, len: 0.9, notes: 'B4 . D5 . E5 . . . D5 . B4 . G4 . A4 . B4 . D5 . E5 . G5 . F#5 . E5 . D5 . . .' },
+  ] },
 };
 
 function renderSong(ctx, song) {

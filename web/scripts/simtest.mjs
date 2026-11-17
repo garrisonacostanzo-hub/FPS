@@ -340,7 +340,7 @@ if (failures) process.exitCode = 1;
   const game = host.game;
   let seq = 5000;
   const cmd = (e, extra = {}) => game.processCommand(e, { s: ++seq, dt: 1 / 60, mx: 0, mz: 0, yaw: e.motor.yaw, pitch: 0, b: 0, sw: -1, r: false, vt: game.time, ...extra });
-  if (DANCES.length !== 8) failures.push(`expected 8 dances, got ${DANCES.length}`);
+  if (DANCES.length !== 9) failures.push(`expected 9 dances, got ${DANCES.length}`);
   host.receive('a', { type: 'dance', d: 'robot' });
   const row = (snap, id) => snap.e.find((r) => r[0] === id);
   if (danceAt(row(game.snapshot(b), a.id)[10]) !== 'robot') failures.push('dance not visible to other players in snapshots');
@@ -365,4 +365,58 @@ if (failures) process.exitCode = 1;
   const dancing = [...game.entities.values()].filter((e) => e.isBot && e.dance).length;
   console.log(`dances: robot visible to others, cancels on move/shoot; ${dancing} bots dancing after the win`);
   if (failures.length) { console.log('DANCE FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('dance checks passed');
+}
+
+// ------------------------------------------------------------------------------------------------
+// Group dance (Crew Groove): nearby players join with Q and dance in sync
+// ------------------------------------------------------------------------------------------------
+{
+  const failures = [];
+  const { GameHost: Host } = await import('../src/shared/host.js');
+  const { danceAt, JOIN_RADIUS } = await import('../src/shared/dances.js');
+  const host = new Host({ mode: 'ffa', map: 'outpost', bots: 0, difficulty: 'normal', scoreLimit: 30 }, { send: () => {} });
+  const a = host.join('a', 'Alpha', { set: 'assault', ability: 'dash' });
+  const b = host.join('b', 'Bravo', { set: 'assault', ability: 'dash' });
+  const c = host.join('c', 'Charlie', { set: 'assault', ability: 'dash' });
+  for (let t = 0; t < 6; t += 0.1) host.update(0.1);
+  const game = host.game;
+  const place = (e, x, z) => { e.motor.x = x; e.motor.z = z; e.motor.y = a.motor.y; };
+  place(b, a.motor.x + 3, a.motor.z);
+  place(c, a.motor.x + JOIN_RADIUS + 6, a.motor.z);
+  host.receive('b', { type: 'dance', j: a.id });
+  if (b.dance) failures.push('joined a player who is not dancing');
+  host.receive('a', { type: 'dance', d: 'robot' });
+  host.receive('b', { type: 'dance', j: a.id });
+  if (b.dance) failures.push('joined a solo (non-group) dance');
+  a.lastDance = -9;
+  host.receive('a', { type: 'dance', d: 'crew' });
+  for (let t = 0; t < 1.3; t += 0.1) host.update(0.1); // the leader is a second into the routine
+  host.receive('b', { type: 'dance', j: a.id });
+  if (!b.dance || b.dance.id !== 'crew') failures.push('nearby player could not join the group dance');
+  else if (b.dance.start !== a.dance.start) failures.push('joiner is not on the same beat as the leader');
+  host.receive('c', { type: 'dance', j: a.id });
+  if (c.dance) failures.push(`joined from ${JOIN_RADIUS + 6} m away`);
+  const row = (snap, id) => snap.e.find((r) => r[0] === id);
+  const snapC = game.snapshot(c);
+  if (danceAt(row(snapC, a.id)[10]) !== 'crew' || row(snapC, a.id)[11] !== row(snapC, b.id)[11] || !row(snapC, a.id)[11]) failures.push('snapshot does not carry the shared dance start');
+  if (game.snapshot(b).you.ds !== game.snapshot(a).you.ds) failures.push('you.ds differs between leader and joiner');
+  // A third player walks over and joins the crew through the joiner (chains keep the same beat).
+  place(c, b.motor.x + 2, b.motor.z);
+  host.receive('c', { type: 'dance', j: b.id });
+  if (!c.dance || c.dance.start !== a.dance.start) failures.push('chain join lost the beat');
+  // The leader stopping doesn't kick the others out.
+  host.receive('a', { type: 'dance', d: null });
+  if (!b.dance || !c.dance) failures.push('crew stopped when the leader stopped');
+  // Idle bots near a group dance sometimes join in.
+  const botHost = new Host({ mode: 'tdm', map: 'outpost', bots: 7, difficulty: 'normal', scoreLimit: 30 }, { send: () => {} });
+  const p = botHost.join('p', 'Pal', { set: 'assault', ability: 'dash' });
+  for (let t = 0; t < 6; t += 0.1) botHost.update(0.1);
+  const mates = [...botHost.game.entities.values()].filter((e) => e.isBot && e.team === p.team);
+  mates.forEach((m, i) => { m.motor.x = p.motor.x + 2 + i; m.motor.z = p.motor.z + 1; m.motor.y = p.motor.y; m.brain.targetVisible = false; });
+  botHost.receive('p', { type: 'dance', d: 'crew' });
+  for (let roll = 0; roll < 6 && !mates.some((m) => m.dance); roll++) { mates.forEach((m) => { m.brain.crewChecked = null; }); botHost.game.botsJoinDances(); }
+  const joined = mates.filter((m) => m.dance && m.dance.start === p.dance.start).length;
+  if (!joined) failures.push('no idle teammate bot ever joined the group dance');
+  console.log(`group dance: join within ${JOIN_RADIUS} m, shared start, chain joins; ${joined}/${mates.length} nearby teammate bots joined`);
+  if (failures.length) { console.log('GROUP DANCE FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('group dance checks passed');
 }

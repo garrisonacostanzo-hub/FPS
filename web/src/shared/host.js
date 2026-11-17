@@ -89,7 +89,8 @@ export class GameHost {
         this.game.emote(entity, String(msg.e || ''));
         break;
       case 'dance':
-        if (msg.d) this.game.startDance(entity, String(msg.d));
+        if (msg.j !== undefined) this.game.joinDance(entity, Number(msg.j));
+        else if (msg.d) this.game.startDance(entity, String(msg.d));
         else this.game.stopDance(entity);
         break;
       case 'voice': {

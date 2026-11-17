@@ -703,5 +703,16 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
 #dance-hint.show { display: block; }
 #dance-hint b { display: block; font-size: 18px; letter-spacing: 2px; }
 #dance-hint small { font-size: 12px; color: rgba(255,255,255,0.7); }
+#dance-hint em { display: block; font-style: normal; font-size: 12px; color: #ffd76a; margin: 2px 0; }
+#join-hint { position: absolute; left: 50%; bottom: 168px; transform: translateX(-50%); background: rgba(10,12,16,0.78); border: 1px solid rgba(255,215,106,0.55); border-radius: 12px; padding: 8px 16px; color: #fff; font-size: 15px; display: none; pointer-events: none; white-space: nowrap; animation: joinPulse 1.2s ease-in-out infinite; }
+#join-hint.show { display: block; }
+@media (max-height: 500px) { #join-hint { bottom: auto; top: 27%; font-size: 13px; padding: 6px 12px; } }
+#join-hint kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 5px; background: #ffd76a; color: #111; font: 700 13px/18px system-ui, sans-serif; text-align: center; }
+#join-hint b { color: #ffd76a; }
+@keyframes joinPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,215,106,0.0); } 50% { box-shadow: 0 0 18px 2px rgba(255,215,106,0.35); } }
+.ew-item em { position: absolute; top: -8px; right: -6px; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: 1px; background: #ffd76a; color: #111; border-radius: 6px; padding: 1px 5px; }
+.tbtn.joinbtn { display: none; right: calc(var(--u) * 212px + var(--sr)); bottom: calc(var(--u) * 112px + var(--sb)); width: calc(var(--u) * 74px); height: calc(var(--u) * 58px); font-size: calc(var(--u) * 20px); border-color: rgba(255,215,106,0.9); background: rgba(255,215,106,0.25); flex-direction: column; }
+.tbtn.joinbtn b { font-size: calc(var(--u) * 11px); letter-spacing: 1px; }
+.tbtn.joinbtn.show { display: flex; }
 #chat-log div.quick b { opacity: 0.95; }
 @media (max-height: 520px) { .ew-tabs { top: 8px; } }

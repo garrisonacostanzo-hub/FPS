@@ -13,7 +13,8 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Weapon sets:** pick one of six fixed sets of four guns, and carry all four.
 * **Special abilities:** pick one of six (Dash, Stim, Frag Grenade, Smoke Grenade, Recon Pulse, Cloak) and use it with **F**.
 * **Ammo drops:** whoever dies drops all the ammo they had; walk over it to refill your guns.
-* **Emotes, quick chat, text chat and voice chat:** dance emotes with music on **B** (third-person camera), quick chat callouts on **Z**, all and team chat, and push-to-talk voice in online matches.
+* **Emotes, quick chat, text chat and voice chat:** dance emotes with music on **B** (third-person camera), including **Crew Groove**, a group dance friends join with **Q**; quick chat callouts on **Z**; all and team chat; and push-to-talk voice in online matches.
+* **Realistic sound:** layered gunshots for each gun, 3D positional audio, distant shots that arrive late and sound muffled, echoes that match the map, footsteps for each surface, and bullet impacts for each material.
 * **Adaptive bots:** they get tougher the better you are and the more you play.
 * **62 skins:** 50 weapon camos (most earned in Ranked) and 12 operator outfits.
 * **Progression:** levels, XP and career stats, saved in cookies and browser storage.
@@ -66,9 +67,22 @@ Pick one ability (PLAY / ONLINE tabs, **ARMORY → ABILITIES**, or the pause men
 
 Abilities run through the same input commands as shooting, so they're predicted on your screen and checked by the host, and Dash stays smooth online. Bots get a random ability and use it when it suits the fight: Stim when hurt, Frag at mid range, Smoke when taking cover, Pulse when they've lost you, Cloak when flanking.
 
+## Sound
+
+All sounds are synthesised in the browser when they're first needed (there are no audio files). Each one is built the way the real sound is made, not from simple beeps:
+
+* **Gunshots** have layers: the sharp crack of the muzzle blast, a low "thump" body, the gun's mechanical action, and an echo tail. Each gun has its own tuning, from the snappy pistol and the buzzy SMG to the big shotgun boom and the sniper's long, rolling report. Your own shots are followed by the shotgun pump, the sniper bolt, and casings tinkling on the ground.
+* **Distance:** enemy shots are positioned in 3D (HRTF, so headphones tell you left, right, front and behind). Far shots lose their highs, sound like a distant pop with a long echo, and arrive late, because sound travels at 343 m/s (a shot 170 m away is heard half a second after the tracer). Explosions work the same way.
+* **Echo (reverb)** matches the map: open and airy on Outpost, a metallic hall ring in Foundry, and short slap-back from buildings in Crossfire.
+* **Reloads** are timed parts: the magazine dropping out, the new one seating with a click, and the bolt or charging handle on an empty reload. Shotguns load shell by shell. Switching weapons mid-reload stops the rest of the reload sounds.
+* **Footsteps** depend on what you stand on: grass, concrete, metal (containers, stairs), wood (crates, floors) or sand.
+* **Bullet impacts** depend on what's hit: a ringing ping on metal, a knock on wood, a dull thud in dirt or sand, a crack on concrete, and a meaty hit on players.
+* **Near misses:** fast bullets passing close make a supersonic crack, and slower ones a whiz.
+* A compressor on the master output keeps big firefights punchy instead of distorted, and a voice limit keeps a crowd of tiny sounds from swamping the important ones.
+
 ## Emotes, quick chat, text chat and voice chat
 
-**Emotes (dances).** Hold **B** (or tap **😀** on a phone) for the emote wheel, point at a dance and let go (or click). Your character dances with its own music loop, and the camera swings out to third person so you can watch. Move the mouse (or drag) to circle the camera around you. Moving, jumping, crouching, shooting, aiming, reloading, switching weapons or using your ability stops the dance and puts you back in first person, looking where you were before. Everyone nearby sees the dance and hears the music from where you're standing. The eight dances are original:
+**Emotes (dances).** Hold **B** (or tap **😀** on a phone) for the emote wheel, point at a dance and let go (or click). Your character dances with its own music loop, and the camera swings out to third person so you can watch. Move the mouse (or drag) to circle the camera around you. Moving, jumping, crouching, shooting, aiming, reloading, switching weapons or using your ability stops the dance and puts you back in first person, looking where you were before. Everyone nearby sees the dance and hears the music from where you're standing. The nine dances are original:
 
 | Dance | Music |
 |---|---|
@@ -80,6 +94,9 @@ Abilities run through the same input commands as shooting, so they're predicted 
 | 🏆 **Victory Hops** | Fanfare, 110 BPM |
 | 👟 **Shuffle** | House, 124 BPM |
 | 🌊 **Arm Wave** | Lo-fi, 92 BPM |
+| 👯 **Crew Groove** (group dance) | Funk, 116 BPM |
+
+**Group dance (Crew Groove).** Start Crew Groove and anyone within 10 m of you sees **"Press Q to join *your name*'s 👯 Crew Groove"** (on a phone, a **👯 JOIN** button appears). When they press **Q**, they jump straight into the routine on the same move and the same beat as you, facing the same way, like a rehearsed crew. They don't start from the beginning. The routine is 16 beats long: step-touch with claps, arm rolls, point left and right, then raise the roof with hops. Anyone can keep the chain going by joining someone who already joined, and the crew shares one copy of the music, so it never doubles up. Each member can stop whenever they like (move, jump or shoot) and the others keep dancing. While someone near you is doing it, **Q** joins the dance instead of switching weapons. Idle teammate bots nearby sometimes join in too.
 
 All the music is generated in the browser. Turn it off under Settings → Graphics & audio → *Emote dance music*. Bots dance too: winners celebrate at the end of a match, and now and then a bot taunts after a kill.
 
@@ -174,6 +191,7 @@ The same file has touch controls. They turn on automatically when you touch the 
 | Switch weapon | Tap the weapon and ammo panel (⇄) to go to the next gun in your set |
 | Special ability | **⚡** button next to AIM (shows the seconds left while it recharges) |
 | Emotes and quick chat / text chat | **😀** (tabs at the top switch between EMOTES and QUICK CHAT) / **💬** at the top right |
+| Join a group dance | **👯 JOIN** (appears next to AIM while someone near you is doing Crew Groove) |
 | Push to talk (online) | Hold **🎙** (left side, shown when voice chat is on) |
 | Scoreboard / pause | **☰** / **II** at the top right |
 
@@ -240,6 +258,7 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 | Chat to everyone / team chat | `T` (or `Enter`) / `Y` (`Tab` while typing switches between them) |
 | Special ability | `F` |
 | Emotes (dances) | Hold `B`, move the mouse toward a dance, let go (or click). Move, jump or shoot to stop |
+| Join a group dance | `Q` when someone near you is doing Crew Groove (otherwise `Q` switches weapons) |
 | Quick chat | Hold `Z`, move the mouse toward a callout, let go (or click). Scroll while the wheel is open to switch between the two |
 | Push to talk (online) | Hold `V` |
 | Pause / menu | `Esc` (has the **TOGGLE SCOPE** switch at the top) |
@@ -527,7 +546,7 @@ web/
    │  ├─ ballistics.js      # bullet flight (velocity, drag, gravity), materials and penetration
    │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers, Showdown titles
    │  ├─ emotes.js          # the eight quick chat callouts
-   │  ├─ dances.js          # the eight dance emotes (ids, names, tempo)
+   │  ├─ dances.js          # the nine dance emotes (ids, names, tempo, which one is the group dance)
    │  ├─ abilities.js       # the six special abilities and their tuning
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
    │  └─ host.js            # fixed-tick match host, client bindings, network messages
@@ -558,7 +577,8 @@ web/
       ├─ hud.js             # HUD, killfeed, scoreboard, minimap, menus
       ├─ input.js           # pointer lock, keyboard/mouse (+ touch state)
       ├─ touch.js           # on-screen touch controls: move stick, look, fire/aim/jump/crouch/reload/swap
-      ├─ audio.js           # procedural WebAudio (positional gunfire, footsteps…)
+      ├─ audio.js           # audio engine: HRTF 3D sound, distance filtering and delay, map reverb, compressor
+      ├─ sfx.js             # sound design: every gunshot, reload, footstep, impact and UI sound, synthesised
       ├─ settings.js        # persisted settings
       ├─ settingsui.js      # settings schema + controls shared by the menu and the pause screen
       ├─ teamcolors.js      # team colours relative to the player (ally blue / enemy red, colour-blind, classic)

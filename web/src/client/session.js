@@ -5,7 +5,7 @@ import { BTN, TEAM } from '../shared/constants.js';
 import { buildMap } from '../shared/map.js';
 import { DEG, clamp, dirFromAngles, lerp, lerpAngle, rayBox, raySphere } from '../shared/math.js';
 import { EMOTES, EMOTE_COOLDOWN, emoteById } from '../shared/emotes.js';
-import { DANCES, danceAt, danceById } from '../shared/dances.js';
+import { DANCES, JOIN_RADIUS, danceAt, danceById, danceIndex, isGroupDance } from '../shared/dances.js';
 import { danceMusic } from './emotemusic.js';
 import { VoiceChat } from './voice.js';
 import { abilityById } from '../shared/abilities.js';
@@ -51,6 +51,9 @@ export class ClientSession {
     this.wheel = { open: false, touch: false, page: 'emotes', key: 'KeyB', x: 0, y: 0, sel: -1 };
     this.dance = null;
     this.hostDance = 0;
+    this.hostDanceStart = 0;
+    this.joinable = null;
+    this.danceAnchors = new Map();
     this.audio = audio;
     this.onExit = onExit;
     this.myId = welcome.id;
@@ -75,6 +78,7 @@ export class ClientSession {
     this.renderer = new GameRenderer(canvas);
     this.renderer.world = this.world;
     this.renderer.loadMap(this.map, this.modeId === 'dom');
+    this.audio.setEnvironment(this.map.theme);
     this.input = new Input(canvas);
     this.input.onLockChange = (locked) => this.onLockChange(locked);
     this.palette = new TeamPalette();
@@ -269,7 +273,7 @@ export class ClientSession {
     this.grenadeList = snap.gr || [];
     this.smokeList = snap.sm || [];
     this.revealedIds = snap.rv ? new Set(snap.rv) : null;
-    if (snap.you) { this.cloakLeft = snap.you.ck || 0; this.hostDance = snap.you.dn || 0; }
+    if (snap.you) { this.cloakLeft = snap.you.ck || 0; this.hostDance = snap.you.dn || 0; this.hostDanceStart = snap.you.ds || 0; }
     if (snap.m.ph !== this.phase) {
       this.phase = snap.m.ph;
       if (this.phase === 'live' && this.ended) { this.ended = false; this.hud.hideEnd(); }
@@ -348,7 +352,9 @@ export class ClientSession {
         // Server-confirmed bullet impacts (entry, exit after penetration, body hits) with the surface material.
         for (const [sid, x, y, z, nx, ny, nz, kind, mat] of ev.l) {
           if (sid === this.myId && kind === 0) continue; // already shown by our own prediction
-          this.renderer.impact([x, y, z, nx, ny, nz], kind === 1, mat >= 0 ? MATERIAL_IDS[mat] : 'ground');
+          const material = mat >= 0 ? MATERIAL_IDS[mat] : 'ground';
+          this.renderer.impact([x, y, z, nx, ny, nz], kind === 1, material);
+          this.audio.impact(material, { x, y, z }, kind === 1);
         }
         return;
       case 'hit':
@@ -524,6 +530,11 @@ export class ClientSession {
     if (locked) {
       this.hud.showPause(false);
       this.audio.ensure();
+      if (!this.soundsReady) {
+        // Render this weapon set's gunshots in the background (one gun per frame) so the first shot doesn't hitch.
+        this.soundsReady = true;
+        this.actor.ws.slots.forEach((slot, i) => setTimeout(() => this.running && this.audio.preload([slot.id]), 60 + i * 120));
+      }
     } else if (!this.ended && !this.hud.chatOpen) {
       this.hud.el.pause.querySelector('h2').textContent = 'PAUSED';
       this.hud.showPause(true);
@@ -599,13 +610,14 @@ export class ClientSession {
     );
     this.updateLook(dt);
     this.updateSway(dt);
-    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed(), ability: abilityById(this.actor.ability), cooldown: Math.max(0, (this.actor.abilityReady || 0) - this.actor.clock) });
+    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed(), ability: abilityById(this.actor.ability), cooldown: Math.max(0, (this.actor.abilityReady || 0) - this.actor.clock), joinable: !!this.joinable });
     // T: chat to everyone · Y: team chat · B: emote wheel.
     const wantChat = this.input.consume('chat'), wantTeam = this.input.consume('teamChat');
     const wantWheel = this.input.consume('emote'), wantQuick = this.input.consume('quick');
     if (!this.paused && !this.wheel.open && (wantChat || wantTeam)) this.openChat(wantTeam && this.teams);
     if (!this.paused && (wantWheel || wantQuick) && !this.wheel.open && !this.hud.chatOpen) this.openEmoteWheel(false, wantQuick ? 'quick' : 'emotes');
     this.updateEmoteWheel();
+    this.updateJoin();
     this.checkDanceCancel();
     this.updateVoice(dt);
 
@@ -816,18 +828,33 @@ export class ClientSession {
   // Emote dances: third-person camera you can orbit with the mouse; moving, jumping, shooting, aiming, crouching,
   // reloading, switching weapons or using an ability stops it.
   // ==============================================================================================
-  startDance(id) {
+  /**
+   * Starts a dance. join = { id, name, startMs, serverStart, yaw } joins that player's group dance: same dance,
+   * same start time (so the same move on the same beat), facing the same way, like a rehearsed crew.
+   */
+  startDance(id, join = null) {
     const d = danceById(id);
     if (!d || !this.actor.alive || this.ended) return;
     if (this.dance) this.stopDance(false);
     this.input.cancelAim();
-    this.dance = { id, start: performance.now(), yaw: this.viewYaw, pitch: this.viewPitch, name: d.name };
+    const now = performance.now();
+    const yaw = join ? join.yaw : this.viewYaw;
+    this.dance = {
+      id, start: join ? join.startMs : now, began: now, yaw, pitch: this.viewPitch, name: d.name,
+      serverStart: join ? join.serverStart : 0, anchored: !!join, leader: join ? join.name : null,
+    };
     // Start the camera in front of you, a little to the side, looking back at your character.
-    this.viewYaw = this.dance.yaw + Math.PI * 0.82;
+    this.viewYaw = yaw + Math.PI * 0.82;
     this.viewPitch = -0.12;
-    this.transport.send({ type: 'dance', d: id });
-    if (settings.emoteMusic && this.audio.ensure()) this.danceMusicSelf = this.audio.playLoop(danceMusic(this.audio.ctx, id), { volume: 0.45 });
-    this.hud.setDanceHint(d, this.touchUI.enabled);
+    this.transport.send(join ? { type: 'dance', j: join.id } : { type: 'dance', d: id });
+    this.playSelfDanceMusic();
+    this.hud.setDanceHint(d, this.touchUI.enabled, join ? join.name : null);
+  }
+
+  playSelfDanceMusic() {
+    if (this.danceMusicSelf) { this.danceMusicSelf.stop(); this.danceMusicSelf = null; }
+    if (!this.dance || !settings.emoteMusic || !this.audio.ensure()) return;
+    this.danceMusicSelf = this.audio.playLoop(danceMusic(this.audio.ctx, this.dance.id), { volume: 0.45, offset: (performance.now() - this.dance.start) / 1000 });
   }
 
   stopDance(send) {
@@ -848,24 +875,88 @@ export class ClientSession {
     const i = this.input;
     const acted = Math.abs(i.moveX) > 0.1 || Math.abs(i.moveZ) > 0.1 || i.fire || i.latched.firePressed || i.latched.jump || i.aim
       || i.abilityHeld || i.crouch || i.latched.slot >= 0 || i.latched.cycle !== 0 || i.latched.reload;
-    const hostStopped = this.hostDance === 0 && performance.now() - this.dance.start > 800;
-    if (acted || !this.actor.alive || this.ended || hostStopped) this.stopDance(!hostStopped);
+    const age = performance.now() - this.dance.began;
+    const hostStopped = this.hostDance === 0 && age > 800;
+    // The host said no (e.g. you walked out of range before the join arrived): back to what it says.
+    const mismatch = this.hostDance !== 0 && this.hostDance !== danceIndex(this.dance.id) && age > 1200;
+    if (acted || !this.actor.alive || this.ended || hostStopped || mismatch) { this.stopDance(!hostStopped); return; }
+    if (!this.dance.anchored && this.hostDance === danceIndex(this.dance.id) && this.hostDanceStart) {
+      // Your own dance: the host's start time for it now means your local start, so anyone who joins you is drawn
+      // (and their music played) on exactly your beat.
+      this.dance.anchored = true;
+      this.dance.serverStart = this.hostDanceStart;
+      if (!this.danceAnchors.has(this.hostDanceStart)) this.danceAnchors.set(this.hostDanceStart, this.dance.start);
+    }
   }
 
-  /** Music for other players' dances (positional), started and stopped as their snapshots change. */
+  /**
+   * A dance's start (host time) as a local performance.now() time, fixed the first time it's seen. Everyone in a crew
+   * shares one start, so they share one anchor: on your screen they're always on the same move, even if the clocks
+   * drift (a slow host's game clock can run behind real time).
+   */
+  danceAnchor(serverStart) {
+    let ms = this.danceAnchors.get(serverStart);
+    if (ms === undefined) {
+      if (this.danceAnchors.size > 64) this.danceAnchors.clear();
+      ms = Math.min(performance.now(), (serverStart - (this.serverOffset || 0)) * 1000);
+      this.danceAnchors.set(serverStart, ms);
+    }
+    return ms;
+  }
+
+  /** "Press Q to join": the nearest player within JOIN_RADIUS doing a group dance you're not already in. */
+  updateJoin() {
+    const want = this.input.consume('join');
+    let best = null;
+    if (this.actor.alive && !this.ended && !this.paused) {
+      const m = this.actor.motor;
+      let bestD = JOIN_RADIUS;
+      for (const [id, pose] of this.renderPoses) {
+        if (!pose.alive || !pose.dance || !isGroupDance(pose.dance) || id === this.myId) continue;
+        if (this.dance && this.dance.id === pose.dance && this.dance.serverStart === pose.danceStart) continue;
+        const d = Math.hypot(pose.x - m.x, pose.z - m.z);
+        if (d > bestD || Math.abs(pose.y - m.y) > 3) continue;
+        const r = this.roster.get(id);
+        if (!r) continue; // left the match
+        bestD = d;
+        best = { id, name: r.name, dance: pose.dance, startMs: pose.danceStartMs, serverStart: pose.danceStart, yaw: pose.yaw };
+      }
+    }
+    this.joinable = best;
+    this.hud.setJoinHint(best ? { name: best.name, dance: danceById(best.dance) } : null, this.touchUI.enabled);
+    if (want && best && !this.wheel.open && !this.hud.chatOpen) {
+      this.input.consume('cycle'); // Q joins instead of switching weapons
+      this.startDance(best.dance, best);
+    }
+  }
+
+  /**
+   * Music for other players' dances (positional), started and stopped as their snapshots change. A crew dancing
+   * the same dance from the same start shares one copy of the music (yours, if you're in it), on their beat.
+   */
   syncDanceMusic(dancers) {
     if (!this.remoteDanceMusic) this.remoteDanceMusic = new Map();
-    for (const [id, m] of this.remoteDanceMusic) {
-      const d = dancers.get(id);
-      if (!d || d.id !== m.id || !settings.emoteMusic) { m.handle.stop(); this.remoteDanceMusic.delete(id); }
+    const groups = new Map();
+    const mine = this.dance && this.dance.serverStart ? `${this.dance.id}@${this.dance.serverStart}` : null;
+    const l = this.audio.listenerPos;
+    for (const [, d] of dancers) {
+      const key = `${d.id}@${d.start}`;
+      if (key === mine) continue;
+      const dist = Math.hypot(d.at.x - l.x, d.at.z - l.z);
+      const g = groups.get(key);
+      if (!g || dist < g.dist) groups.set(key, { ...d, dist });
+    }
+    for (const [key, m] of this.remoteDanceMusic) {
+      if (!groups.has(key) || !settings.emoteMusic) { m.handle.stop(); this.remoteDanceMusic.delete(key); }
     }
     if (!settings.emoteMusic) return;
-    for (const [id, d] of dancers) {
-      const m = this.remoteDanceMusic.get(id);
+    for (const [key, d] of groups) {
+      const m = this.remoteDanceMusic.get(key);
       if (m) { m.handle.setPosition(d.at); continue; }
       if (!this.audio.ensure()) return;
-      const handle = this.audio.playLoop(danceMusic(this.audio.ctx, d.id), { volume: 0.5, position: d.at });
-      if (handle) this.remoteDanceMusic.set(id, { id: d.id, handle });
+      const offset = d.start ? this.estimatedServerTime() - d.start : 0;
+      const handle = this.audio.playLoop(danceMusic(this.audio.ctx, d.id), { volume: 0.5, position: d.at, offset });
+      if (handle) this.remoteDanceMusic.set(key, { id: d.id, handle });
     }
   }
 
@@ -949,6 +1040,22 @@ export class ClientSession {
     return result;
   }
 
+  /** What the feet at (x, y, z) are standing on, for footstep sounds. */
+  surfaceAt(x, y, z) {
+    let top = null;
+    this.world.forEachNear(x, z, x, z, (b) => {
+      if (x >= b.min[0] && x <= b.max[0] && z >= b.min[2] && z <= b.max[2] && Math.abs(b.max[1] - y) < 0.25) top = b;
+      return false;
+    });
+    if (!top) return this.map.theme && this.map.theme.ground === 'grass' ? 'grass' : 'concrete';
+    switch (top.m) {
+      case 'crate': case 'floor': return 'wood';
+      case 'metal': case 'container': case 'containerB': case 'stairs': return 'metal';
+      case 'sand': return 'sand';
+      default: return 'concrete';
+    }
+  }
+
   estimatedServerTime() {
     return performance.now() / 1000 + (this.serverOffset || 0);
   }
@@ -957,11 +1064,18 @@ export class ClientSession {
     if (this._hooks) return this._hooks;
     this._hooks = {
       onShot: (actor, shot) => this.onLocalShot(actor, shot),
-      onNoise: (actor, radius, kind) => { if (kind === 'step') this.audio.footstep(null, actor.motor.crouching ? 0.06 : actor.motor.sprinting ? 0.22 : 0.14); },
-      onReload: (_actor, duration) => { this.hud.showReload(duration); this.renderer.viewModelReload(duration); this.audio.reload(); },
+      onNoise: (actor, radius, kind) => {
+        if (kind === 'step') this.audio.footstep(null, actor.motor.crouching ? 0.06 : actor.motor.sprinting ? 0.22 : 0.14, this.surfaceAt(actor.motor.x, actor.motor.y, actor.motor.z));
+      },
+      onReload: (actor, duration) => {
+        this.hud.showReload(duration);
+        this.renderer.viewModelReload(duration);
+        const slot = actor.ws.slots ? actor.ws.slots[actor.ws.active] : null;
+        this.audio.reload(activeWeapon(actor.ws).id, duration, !!slot && slot.mag === 0);
+      },
       onReloadDone: () => { this.audio.reloadDone(); this.hud.hideReload(); },
       onDryFire: () => this.audio.dryFire(),
-      onSwitch: () => { this.hud.hideReload(); this.renderer.setViewWeapon(activeWeapon(this.actor.ws).id); },
+      onSwitch: () => { this.hud.hideReload(); this.audio.cancelReload(); this.renderer.setViewWeapon(activeWeapon(this.actor.ws).id); },
     };
     return this._hooks;
   }
@@ -987,6 +1101,7 @@ export class ClientSession {
 
     this.renderer.viewModelFire();
     this.audio.gunshot(w.id, null, true);
+    this.audio.afterShot(w.id);
     if (this.match) this.match.shots++;
     const muzzle = this.renderer.muzzleWorldPosition(new THREE.Vector3());
     this.renderer.muzzleLight(muzzle);
@@ -1015,7 +1130,14 @@ export class ClientSession {
       const path = tracePath(this.world, shot.ox, shot.oy, shot.oz, dir.x, dir.y, dir.z, w, hitTest);
       const point = [path.x, path.y, path.z, path.nx, path.ny, path.nz];
       if (pellets === 1 || p % 2 === 0) this.renderer.tracer(muzzle, point, 0xfff0b0, path.time * 1000);
-      if (path.kind === 'world') this.renderer.impact(point, false, path.box ? path.box.m : 'ground', path.time * 1000);
+      if (path.kind === 'world') {
+        const material = path.box ? path.box.m : 'ground';
+        this.renderer.impact(point, false, material, path.time * 1000);
+        if (p === 0 || pellets < 3 || p % 3 === 0) {
+          const at = { x: path.x, y: path.y, z: path.z };
+          setTimeout(() => this.running && this.audio.impact(material, at, false), path.time * 1000);
+        }
+      }
     }
   }
 
@@ -1095,9 +1217,10 @@ export class ClientSession {
         yaw: lerpAngle(ea[4], eb[4], f), pitch: lerp(ea[5], eb[5], f), crouch: lerp(ea[6], eb[6], f),
         alive: (eb[7] & 1) === 1, sprint: (eb[7] & 2) !== 0, weapon: eb[8], hp: eb[9],
         cloak: (eb[7] & 32) !== 0, revealed: !!(this.revealedIds && this.revealedIds.has(id)),
-        dance: danceAt(eb[10] || 0),
+        dance: danceAt(eb[10] || 0), danceStart: eb[11] || 0, danceStartMs: undefined,
       };
-      if (pose.dance && pose.alive) dancers.set(id, { id: pose.dance, at: { x: pose.x, y: pose.y + 1, z: pose.z } });
+      if (pose.dance && pose.danceStart) pose.danceStartMs = this.danceAnchor(pose.danceStart);
+      if (pose.dance && pose.alive) dancers.set(id, { id: pose.dance, start: pose.danceStart, at: { x: pose.x, y: pose.y + 1, z: pose.z } });
       this.renderPoses.set(id, pose);
       const ally = this.palette.isAlly(id, info.team);
       const color = this.palette.entity(id, info.team);
@@ -1109,7 +1232,7 @@ export class ClientSession {
         const stride = (this.strides.get(id) || 0) + speed * dt;
         if (stride > (pose.sprint ? 2.6 : 2.0)) {
           this.strides.set(id, 0);
-          this.audio.footstep({ x: pose.x, y: pose.y, z: pose.z }, pose.crouch > 0.5 ? 0.12 : 0.35);
+          this.audio.footstep({ x: pose.x, y: pose.y, z: pose.z }, pose.crouch > 0.5 ? 0.12 : 0.35, this.surfaceAt(pose.x, pose.y, pose.z));
         } else this.strides.set(id, stride);
       }
     }
@@ -1158,7 +1281,7 @@ export class ClientSession {
       cam.lookAt(tx, ty - 0.1, tz);
       this.renderer.syncSelf({
         pose: { x: px, y: py, z: pz, yaw: this.dance.yaw, pitch: 0, crouch: 0, alive: true, weapon: w.id },
-        dance: this.dance.id, dt,
+        dance: this.dance.id, danceStartMs: this.dance.start, dt,
         info: { team: this.myTeam, color: this.palette.colors.ally, ally: true, outline: false, outfit: profile.equipped.outfit, camo: profile.equipped.camo, weapon: w.id },
       });
     } else if (this.actor.alive) {

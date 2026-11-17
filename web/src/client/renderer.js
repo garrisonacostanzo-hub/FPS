@@ -285,10 +285,13 @@ class CharacterModel {
   }
 
   /** Emote dance (id, or null to stop). The gun arms hide and the free dance arms take over. */
-  setDance(id) {
-    if ((this.danceId || null) === (id || null)) return;
-    this.danceId = id || null;
-    this.danceStart = performance.now();
+  setDance(id, startMs) {
+    const next = id || null;
+    if ((this.danceId || null) === next && (!next || startMs === undefined || startMs === this.danceStart)) return;
+    // startMs (performance.now() time) puts several dancers on the same beat; a re-anchor keeps the ease-in.
+    if (!this.danceId || this.danceId !== next) this.danceShown = performance.now();
+    this.danceId = next;
+    this.danceStart = startMs ?? performance.now();
     const dancing = !!this.danceId;
     this.danceArms.visible = dancing;
     this.armPivot.visible = !dancing;
@@ -298,7 +301,8 @@ class CharacterModel {
   animateDance() {
     if (!this.danceId) return;
     const d = danceById(this.danceId);
-    applyDancePose(this, dancePose(this.danceId, (performance.now() - this.danceStart) / 1000, d ? d.bpm : 120));
+    const now = performance.now();
+    applyDancePose(this, dancePose(this.danceId, (now - this.danceStart) / 1000, d ? d.bpm : 120, (now - this.danceShown) / 1000));
   }
 
   /** Cloak: enemies see only a faint shimmer; teammates still see you. */
@@ -707,7 +711,7 @@ export class GameRenderer {
     }
     c.setMarker(markerVisible && pose.alive);
     c.setCloak(!!pose.cloak && pose.alive, !!info.ally);
-    c.setDance(pose.alive ? pose.dance : null);
+    c.setDance(pose.alive ? pose.dance : null, pose.danceStartMs);
     c.setRevealed(!!pose.revealed && pose.alive);
     const key = (labelText || '') + labelColor;
     if (c.labelKey !== key) { c.setLabel(labelText, labelColor); c.labelKey = key; }
@@ -728,7 +732,7 @@ export class GameRenderer {
     const m = this.selfModel;
     m.root.visible = true;
     m.setWeapon(state.pose.weapon);
-    m.setDance(state.dance);
+    m.setDance(state.dance, state.danceStartMs);
     m.update(state.pose, state.dt);
   }
 
