@@ -148,6 +148,7 @@ export class Input {
         if (code === 'Digit2') this.latched.slot = 1;
         if (code === 'Digit3') this.latched.slot = 2;
         if (code === 'Digit4') this.latched.slot = 3;
+        if (code === 'Digit5') this.latched.slot = 4; // knife
         if (code === 'KeyQ') { this.latched.cycle = -1; this.latched.join = true; } // Q also joins a group dance nearby
         if (code === 'KeyE') this.latched.cycle = 1;
         if ((code === 'ControlLeft' || code === 'KeyC') && settings.toggleCrouch) this.crouchToggled = !this.crouchToggled;

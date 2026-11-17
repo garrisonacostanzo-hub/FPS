@@ -137,9 +137,16 @@ export class BotBrain {
     const ws = e.ws;
     const slot = ws.slots[ws.active];
     const hasAmmo = (sl) => sl.mag + sl.reserve > 0;
+    const knifeSlot = ws.slots.findIndex((sl) => WEAPONS[sl.id].melee);
+    const close = this.target && this.targetVisible ? Math.hypot(this.target.motor.x - e.motor.x, this.target.motor.z - e.motor.z) : Infinity;
     if (slot && !hasAmmo(slot) && ws.slots.length > 1) {
-      const next = ws.slots.findIndex((sl) => hasAmmo(sl));
+      const next = ws.slots.findIndex((sl) => hasAmmo(sl) && !WEAPONS[sl.id].melee);
       if (next >= 0) cmd.sw = next;
+      else if (knifeSlot >= 0) cmd.sw = knifeSlot; // out of ammo everywhere: knife it is
+    } else if (knifeSlot >= 0 && knifeSlot !== ws.active && close < 3.6 && this.now >= (this.nextKnifeCheck || 0)) {
+      // Point blank: sometimes go for the knife (more likely mid-reload, which the switch cancels).
+      this.nextKnifeCheck = this.now + 1.2;
+      if (this.rng() < (ws.reloading ? 0.6 : 0.3) + 0.3 * this.d.aggression) { cmd.sw = knifeSlot; this.nextGunCheck = this.now + 2.5; }
     } else if (slot && ws.slots.length > 1 && this.target && this.targetVisible && !ws.reloading && this.now >= (this.nextGunCheck || 0)) {
       this.nextGunCheck = this.now + 1.2 + this.rng() * 0.8;
       const d = Math.hypot(this.target.motor.x - e.motor.x, this.target.motor.z - e.motor.z);
@@ -771,10 +778,10 @@ export class BotBrain {
       const eyeT = tm.y + eyeHeightOf(tm);
       // Ballistics: lead a moving target by the bullet's flight time and aim above for drop. Better bots do it better.
       const w = activeWeapon(e.ws);
-      const tof = flightTime(w, dist);
+      const tof = w.melee ? 0 : flightTime(w, dist);
       const lead = 0.35 + 0.65 * d.accuracy;
       const ax = tm.x + this.err.x + tm.vx * tof * lead;
-      const ay = (this.headAim ? eyeT + 0.05 : tm.y + (eyeT - tm.y) * 0.72) + this.err.y + dropAt(w, dist) * (0.4 + 0.6 * d.accuracy);
+      const ay = (this.headAim ? eyeT + 0.05 : tm.y + (eyeT - tm.y) * 0.72) + this.err.y + (w.melee ? 0 : dropAt(w, dist)) * (0.4 + 0.6 * d.accuracy);
       const az = tm.z + this.err.z + tm.vz * tof * lead;
       this.aimPoint = { x: ax, y: ay, z: az };
       const desired = anglesFromDir(ax - m.x, ay - eyeY, az - m.z);
@@ -802,6 +809,14 @@ export class BotBrain {
     const visibleShot = this.targetVisible && this.target && this.now - this.acquired >= d.reaction;
     const suppressShot = !this.targetVisible && this.suppressive;
     if (!visibleShot && !suppressShot) { this.triggerToggle = false; return; }
+    if (w.melee) {
+      // Knife: swing only when the target is within reach.
+      const t = this.target;
+      if (!t || !this.targetVisible || Math.hypot(t.motor.x - e.motor.x, t.motor.z - e.motor.z) > w.reach + 0.2) return;
+      if ((this.aimError || 0) > 0.6) return;
+      cmd.b |= BTN.FIRE;
+      return;
+    }
     if (slot.mag === 0) { this.reloadWanted = true; return; }
     if (this.now < this.nextBurst) { this.triggerToggle = false; return; }
 

@@ -213,13 +213,19 @@ class GunGame extends FreeForAll {
 
   loadoutFor(entity) {
     const tier = Math.min(entity.tier || 0, GUNGAME_LADDER.length - 1);
-    return [GUNGAME_LADDER[tier]];
+    return [GUNGAME_LADDER[tier], 'knife']; // everyone also has a combat knife (key 5)
   }
 
-  onKill(killer, victim) {
+  onKill(killer, victim, info = {}) {
     if (!killer || killer === victim) {
       if (victim) victim.tier = Math.max(0, (victim.tier || 0) - 1);
       return;
+    }
+    // Humiliation: a knife kill also knocks the victim down one weapon.
+    if (WEAPONS[info.weaponId] && WEAPONS[info.weaponId].melee && (victim.tier || 0) > 0) {
+      victim.tier--;
+      victim.score = victim.tier;
+      if (!victim.isBot) this.game.eventTo(victim, { type: 'ann', text: 'KNIFED! DOWN TO ' + WEAPONS[GUNGAME_LADDER[victim.tier]].name.toUpperCase() });
     }
     killer.tier = (killer.tier || 0) + 1;
     killer.score = killer.tier;

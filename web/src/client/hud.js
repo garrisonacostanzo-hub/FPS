@@ -90,15 +90,16 @@ export class Hud {
     const slot = ws.slots[ws.active];
     if (!slot) return;
     const w = WEAPONS[slot.id];
-    this.el.mag.textContent = slot.mag;
-    this.el.mag.classList.toggle('low', slot.mag <= Math.ceil(w.mag * 0.25));
-    this.el.reserve.textContent = slot.reserve;
-    const mode = w.mode === 'auto' ? 'AUTO' : 'SEMI';
+    this.el.mag.textContent = w.melee ? '∞' : slot.mag;
+    this.el.mag.classList.toggle('low', !w.melee && slot.mag <= Math.ceil(w.mag * 0.25));
+    this.el.reserve.textContent = w.melee ? `${w.damage} DMG` : slot.reserve;
+    this.el.mag.parentElement.classList.toggle('melee', !!w.melee);
+    const mode = w.melee ? `MELEE · ${w.swing}s` : w.mode === 'auto' ? 'AUTO' : 'SEMI';
     const key = slot.id + ws.active;
     if (this._weaponKey !== key) {
       this._weaponKey = key;
       this.el.weapon.innerHTML = `${esc(w.name.toUpperCase())} <span class="accent">${mode}</span>`;
-      this.el.slots.innerHTML = ws.slots.map((s, i) => `<span class="${i === ws.active ? 'on' : ''}">${i + 1} ${esc(WEAPONS[s.id].name.split(' ')[0])}</span>`).join('');
+      this.el.slots.innerHTML = ws.slots.map((s, i) => `<span class="${i === ws.active ? 'on' : ''}">${i + 1} ${WEAPONS[s.id].melee ? '🔪' : esc(WEAPONS[s.id].name.split(' ')[0])}</span>`).join('');
       this.applyCrosshairStyle(w);
     }
   }
@@ -121,7 +122,7 @@ export class Hud {
   applyCrosshairStyle(weapon) {
     if (weapon) this.crosshairWeapon = weapon;
     const w = this.crosshairWeapon;
-    const perWeapon = w ? (w.id === 'shotgun' ? 'circle' : w.id === 'sniper' ? 'dot' : w.id === 'smg' ? 'dotcross' : 'cross') : 'cross';
+    const perWeapon = w ? (w.melee ? 'dot' : w.id === 'shotgun' ? 'circle' : w.id === 'sniper' ? 'dot' : w.id === 'smg' ? 'dotcross' : 'cross') : 'cross';
     const style = settings.crosshairStyle && settings.crosshairStyle !== 'auto' ? settings.crosshairStyle : perWeapon;
     this.el.cross.dataset.style = style;
     const targetColor = this.crossTarget === 'enemy' ? this.palette.colors.enemy : this.crossTarget === 'ally' ? this.palette.colors.ally : null;
@@ -167,7 +168,7 @@ export class Hud {
     const row = document.createElement('div');
     row.className = 'feed-row' + (highlight ? ' me' : '');
     const kname = killer ? `<b style="color:${killerColor}">${esc(killer)}</b> ` : '';
-    row.innerHTML = `${kname}<span class="weap">[${esc(w ? w.name : 'world')}]${headshot ? ' <span class="hs">HS</span>' : ''}</span> <b style="color:${victimColor}">${esc(victim)}</b>`;
+    row.innerHTML = `${kname}<span class="weap">[${w && w.melee ? '🔪 ' : ''}${esc(w ? w.name : 'world')}]${headshot ? ' <span class="hs">HS</span>' : ''}</span> <b style="color:${victimColor}">${esc(victim)}</b>`;
     this.el.feed.prepend(row);
     while (this.el.feed.children.length > 6) this.el.feed.lastChild.remove();
     setTimeout(() => row.classList.add('fade'), 6000);
@@ -574,7 +575,7 @@ export class Hud {
   // ------------------------------------------------------------------------------------------------
   buildPause() {
     const el = this.el.pause;
-    const setOptions = WEAPON_SETS.map((ws) => `<option value="${ws.id}" ${settings.weaponSet === ws.id ? 'selected' : ''}>${esc(ws.name)}: ${ws.guns.map((g) => esc(WEAPONS[g].name.split(' ')[0])).join(', ')}</option>`).join('');
+    const setOptions = WEAPON_SETS.map((ws) => `<option value="${ws.id}" ${settings.weaponSet === ws.id ? 'selected' : ''}>${esc(ws.name)}: ${ws.guns.map((g) => esc(WEAPONS[g].name.split(' ')[0])).join(', ')} + ${esc(WEAPONS[ws.knife].name)}</option>`).join('');
     const toggleOn = settings.toggleAim && settings.aimButton === 'toggle';
     el.innerHTML = `
       <div class="panel">

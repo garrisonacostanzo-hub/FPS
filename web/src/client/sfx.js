@@ -411,3 +411,70 @@ export function impulseResponse(rate, kind) {
   }
   return ch;
 }
+
+// -------------------------------------------------------------------------------------------------
+// Knives
+// -------------------------------------------------------------------------------------------------
+/**
+ * The whoosh of a swing: noise through a band-pass that sweeps up then down as the blade passes, like air
+ * cut by a moving edge. weight 0 (karambit) .. 1 (hatchet): heavier blades are lower, longer and fuller.
+ */
+export function knifeSwing(rate, weight, seed) {
+  const dur = 0.16 + 0.22 * weight;
+  const out = new Float32Array(Math.ceil((dur + 0.05) * rate));
+  const r = rng(seed);
+  const peak = 0.42 + 0.08 * r(); // where the blade is fastest (fraction of the swing)
+  const fLow = 500 - 250 * weight, fHigh = 3400 - 1600 * weight;
+  let low = 0, band = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate, x = t / dur;
+    const env = x < peak ? Math.pow(x / peak, 2) : Math.max(0, 1 - (x - peak) / (1 - peak)) ** 1.6;
+    const f = fLow + (fHigh - fLow) * env;
+    const k = 2 * Math.sin(Math.PI * Math.min(0.24, f / rate));
+    // State-variable filter (band-pass) with a little resonance for the "edge" tone.
+    low += k * band;
+    const high = r() - low - 0.55 * band;
+    band += k * high;
+    out[i] = band * env * (0.9 + 0.2 * weight);
+  }
+  return finish(out, 1.1, 0.7);
+}
+
+/** Blade hitting something: kind 'body' (cut + thud) or a map material (clink / chunk). */
+export function knifeHit(rate, weight, kind, seed) {
+  const out = new Float32Array(Math.ceil(0.4 * rate));
+  const r = rng(seed);
+  if (kind === 'body') {
+    // Wet slice: a short bright tear, then the meaty thud of the hilt.
+    burst(out, rate, 0, { type: 'bandpass', freq: 2600 - 900 * weight, q: 0.9, decay: 0.03, gain: 0.9, seed });
+    burst(out, rate, 0.004, { type: 'lowpass', freq: 900, decay: 0.04 + 0.03 * weight, gain: 1.3, seed: seed + 1 });
+    thump(out, rate, 0.006, 160 - 50 * weight, 70, 0.012, 0.05 + 0.04 * weight, 1 + 0.6 * weight);
+  } else if (kind === 'metal' || kind === 'container' || kind === 'containerB' || kind === 'stairs') {
+    burst(out, rate, 0, { type: 'highpass', freq: 3500, decay: 0.002, gain: 1, seed });
+    ring(out, rate, 0, [2400 + 400 * r(), 3900 + 500 * r(), 6100 + 400 * r()], 0.09, 1, r); // steel on steel
+    burst(out, rate, 0.01, { type: 'bandpass', freq: 5000, q: 2, decay: 0.05, gain: 0.25, seed: seed + 2 }); // scrape
+  } else if (kind === 'crate' || kind === 'floor') {
+    burst(out, rate, 0, { type: 'bandpass', freq: 700, q: 1, decay: 0.03, gain: 1.4, seed });
+    ring(out, rate, 0, [260 + 40 * r(), 520], 0.04, 0.5, r);
+    ring(out, rate, 0.002, [3100 + 300 * r()], 0.02, 0.25, r); // the blade's own ring
+  } else {
+    burst(out, rate, 0, { type: 'highpass', freq: 2800, decay: 0.003, gain: 1.2, seed });
+    ring(out, rate, 0, [2900 + 500 * r(), 4700 + 400 * r()], 0.05, 0.6, r);
+    burst(out, rate, 0.004, { type: 'bandpass', freq: 1300, q: 0.8, decay: 0.015, gain: 0.6, seed: seed + 1 });
+  }
+  return finish(out, 1.3, 0.85);
+}
+
+/** Pulling the knife out: a metallic "shing" as the blade slides past the sheath. */
+export function knifeDraw(rate, seed) {
+  const out = new Float32Array(Math.ceil(0.32 * rate));
+  const r = rng(seed);
+  const hp = biquad('highpass', 4000, 0.7, rate);
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    const env = Math.min(1, t / 0.08) * exp(-Math.max(0, t - 0.08) / 0.05);
+    out[i] = hp(r()) * env * 0.5;
+  }
+  ring(out, rate, 0.1, [3300 + 200 * r(), 5200 + 300 * r(), 7400], 0.12, 0.5, r);
+  return finish(out, 1.1, 0.6);
+}

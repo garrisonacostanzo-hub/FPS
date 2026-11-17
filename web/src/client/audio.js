@@ -236,6 +236,32 @@ export class AudioEngine {
     }
   }
 
+  // ------------------------------------------------------------------------------------------------
+  // Knives (weight: karambit light ... hatchet heavy)
+  // ------------------------------------------------------------------------------------------------
+  knifeSwing(weaponId, position) {
+    if (!this.ensure()) return;
+    const weight = knifeWeight(weaponId);
+    this.play(this.variant(`kswing:${weight}`, (rate, seed) => sfx.knifeSwing(rate, weight, seed)), {
+      volume: position ? 0.6 : 0.5, rate: 0.94 + Math.random() * 0.12, position, maxDistance: 30, reverb: 0.08,
+    });
+  }
+
+  /** kind: 'body' or a map material id. position null = your own swing. */
+  knifeHit(weaponId, kind, position) {
+    if (!this.ensure()) return;
+    const weight = knifeWeight(weaponId);
+    const k = kind === 'body' ? 'body' : impactKind(kind) === 'metal' ? 'metal' : impactKind(kind) === 'wood' ? 'crate' : 'concrete';
+    this.play(this.variant(`khit:${k}:${weight}`, (rate, seed) => sfx.knifeHit(rate, weight, k, seed)), {
+      volume: kind === 'body' ? 0.85 : 0.65, rate: 0.95 + Math.random() * 0.1, position, maxDistance: 40, reverb: 0.12,
+    });
+  }
+
+  knifeDraw() {
+    if (!this.ensure()) return;
+    this.play(this.variant('kdraw', (rate, seed) => sfx.knifeDraw(rate, seed)), { volume: 0.45, reverb: 0.05 });
+  }
+
   dryFire() {
     if (!this.ensure()) return;
     this.play(this.variant('dry', (rate, seed) => sfx.dryFire(rate, seed)), { volume: 0.5, reverb: 0 });
@@ -357,6 +383,11 @@ export class AudioEngine {
     const b = this.buffer('ab-' + kind, (ctx) => synth(ctx, cue[1], cue[0], 0.9));
     this.play(b, { volume: position ? 0.8 : 0.6, position, maxDistance: 60, reverb: 0.15 });
   }
+}
+
+/** Knife weight for its sounds, in three steps: light (karambit, stiletto), medium, heavy (machete, hatchet). */
+function knifeWeight(weaponId) {
+  return weaponId === 'karambit' || weaponId === 'stiletto' ? 0 : weaponId === 'machete' || weaponId === 'hatchet' ? 1 : 0.5;
 }
 
 /** Map material id -> impact sound family. */

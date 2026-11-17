@@ -219,13 +219,13 @@ if (failures) process.exitCode = 1;
   const a = host.join('a', 'Alpha', 'marksman');
   const b = host.join('b', 'Bravo', 'heavy');
   const ids = (e) => e.ws.slots.map((s) => s.id).join(',');
-  if (ids(a) !== 'dmr,rifle,smg,pistol') failures.push(`marksman set gave ${ids(a)}`);
-  if (ids(b) !== 'lmg,rifle,shotgun,pistol') failures.push(`heavy set gave ${ids(b)}`);
+  if (ids(a) !== 'dmr,rifle,smg,pistol,bayonet') failures.push(`marksman set gave ${ids(a)}`);
+  if (ids(b) !== 'lmg,rifle,shotgun,pistol,hatchet') failures.push(`heavy set gave ${ids(b)}`);
   const bots = [...host.game.entities.values()].filter((e) => e.isBot);
-  if (!bots.every((e) => e.ws.slots.length === 4 && WEAPON_SETS.some((ws) => ws.guns.join(',') === ids(e)))) failures.push('bots do not carry a full weapon set');
+  if (!bots.every((e) => e.ws.slots.length === 5 && WEAPON_SETS.some((ws) => [...ws.guns, ws.knife].join(',') === ids(e)))) failures.push('bots do not carry a full weapon set');
   host.join('c', 'Charlie', 'no-such-set');
   const c = [...host.game.entities.values()].find((e) => e.name === 'Charlie');
-  if (ids(c) !== WEAPON_SETS[0].guns.join(',')) failures.push('unknown set id was not replaced by the default');
+  if (ids(c) !== [...WEAPON_SETS[0].guns, WEAPON_SETS[0].knife].join(',')) failures.push('unknown set id was not replaced by the default');
   for (let t = 0; t < 6; t += 0.1) host.update(0.1); // past warmup, everyone alive
   // Ammo drop: Bravo dies carrying ammo; Alpha (low on rifle ammo) walks over the pack.
   b.ws.slots[1].mag = 20; b.ws.slots[1].reserve = 60;
@@ -255,7 +255,7 @@ if (failures) process.exitCode = 1;
   host.game.setPreferredSet(a, 'recon');
   a.alive = false;
   host.game.respawnEntity(a);
-  if (ids(a) !== 'sniper,dmr,smg,pistol') failures.push(`new set after respawn: ${ids(a)}`);
+  if (ids(a) !== 'sniper,dmr,smg,pistol,stiletto') failures.push(`new set after respawn: ${ids(a)}`);
   console.log(`weapon sets: marksman -> recon after respawn; ammo pack: rifle ${10}->${rifleAfter}, dmr 0->${dmrAfter}`);
   if (failures.length) { console.log('SETS/AMMO FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('weapon set and ammo drop checks passed');
 }
@@ -419,4 +419,99 @@ if (failures) process.exitCode = 1;
   if (!joined) failures.push('no idle teammate bot ever joined the group dance');
   console.log(`group dance: join within ${JOIN_RADIUS} m, shared start, chain joins; ${joined}/${mates.length} nearby teammate bots joined`);
   if (failures.length) { console.log('GROUP DANCE FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('group dance checks passed');
+}
+
+// ------------------------------------------------------------------------------------------------
+// Knives: one per weapon set (slot 5), fast/light to slow/heavy, reach, backstabs, never run out, bots use them
+// ------------------------------------------------------------------------------------------------
+{
+  const failures = [];
+  const { GameHost: Host } = await import('../src/shared/host.js');
+  const { BTN } = await import('../src/shared/constants.js');
+  const { WEAPONS, WEAPON_SETS, KNIFE_IDS } = await import('../src/shared/weapons.js');
+  const knives = WEAPON_SETS.map((s) => s.knife);
+  if (new Set(knives).size !== WEAPON_SETS.length || !knives.every((k) => WEAPONS[k] && WEAPONS[k].melee)) failures.push('every set needs its own knife');
+  const bySpeed = KNIFE_IDS.map((id) => WEAPONS[id]).sort((p, q) => p.swing - q.swing);
+  if (!bySpeed.every((k, i) => i === 0 || k.damage > bySpeed[i - 1].damage)) failures.push('slower knives should hit harder');
+
+  const host = new Host({ mode: 'ffa', map: 'outpost', bots: 0, difficulty: 'normal', scoreLimit: 50 }, { send: () => {} });
+  const a = host.join('a', 'Alpha', { set: 'assault', ability: 'dash' });
+  const b = host.join('b', 'Bravo', { set: 'recon', ability: 'dash' });
+  const k = host.join('k', 'Kara', { set: 'cqb', ability: 'dash' });
+  for (let t = 0; t < 6; t += 0.1) host.update(0.1);
+  const game = host.game;
+  // An open patch of ground to fight on.
+  let spot = null;
+  for (let x = -40; x <= 40 && !spot; x += 2) for (let z = -40; z <= 40 && !spot; z += 2) {
+    if (!game.world.overlaps(x - 5, 0.05, z - 5, x + 5, 3, z + 5)) spot = { x, z };
+  }
+  let seq = 9000;
+  const cmd = (e, extra = {}) => game.processCommand(e, { s: ++seq, dt: 1 / 60, mx: 0, mz: 0, yaw: e.motor.yaw, pitch: -0.1, b: 0, sw: -1, r: false, vt: game.time, ...extra });
+  const place = (e, x, z, yaw) => { e.motor.x = x; e.motor.y = 0; e.motor.z = z; e.motor.vx = e.motor.vy = e.motor.vz = 0; e.motor.yaw = yaw; e.hp = e.maxHp; e.alive = true; e.protectUntil = 0; e.dance = null; };
+  const faceYaw = (from, to) => Math.atan2(-(to.motor.x - from.motor.x), -(to.motor.z - from.motor.z));
+  const swings = (e) => game.events.filter((ev) => ev.type === 'mel' && ev.s === e.id).length;
+  const hold = (e, seconds, extra = {}) => { for (let i = 0; i < Math.round(seconds * 60); i++) cmd(e, extra); };
+  // Pull the knife out (key 5 = slot index 4) and wait out the equip time.
+  place(a, spot.x, spot.z, 0); place(b, spot.x, spot.z - 1.5, 0); place(k, spot.x + 30, spot.z, 0);
+  cmd(a, { sw: 4 }); hold(a, 0.5);
+  if (WEAPONS[a.ws.slots[a.ws.active].id].id !== 'knife') failures.push('slot 5 is not the combat knife');
+  // Face to face at 1.5 m: one swing = the knife's damage.
+  b.motor.yaw = faceYaw(b, a);
+  game.events.length = 0;
+  cmd(a, { yaw: faceYaw(a, b), b: BTN.FIRE });
+  const hit1 = b.maxHp - b.hp;
+  if (hit1 !== WEAPONS.knife.damage) failures.push(`combat knife hit for ${hit1}, expected ${WEAPONS.knife.damage}`);
+  // Out of reach: nothing.
+  place(b, spot.x, spot.z - 3.5, Math.PI);
+  hold(a, 0.6, { yaw: faceYaw(a, b), b: BTN.FIRE });
+  if (b.hp !== b.maxHp) failures.push(`hit from 3.5 m (reach ${WEAPONS.knife.reach} m)`);
+  // Swing rate: holding the button swings once per `swing` seconds.
+  game.events.length = 0;
+  hold(a, 1.0, { yaw: Math.PI / 2, b: BTN.FIRE });
+  const aSwings = swings(a);
+  if (aSwings < 2 || aSwings > 3) failures.push(`combat knife swung ${aSwings} times in 1 s (0.45 s per swing)`);
+  if (a.ws.slots[4].mag !== 1 || a.ws.reloading) failures.push('the knife used up ammo or started a reload');
+  // Karambit: quicker swings, less damage.
+  cmd(k, { sw: 4 }); hold(k, 0.4);
+  game.events.length = 0;
+  hold(k, 1.0, { yaw: 0, b: BTN.FIRE });
+  const kSwings = swings(k);
+  if (kSwings < 3 || kSwings > 4) failures.push(`karambit swung ${kSwings} times in 1 s (0.28 s per swing)`);
+  // Backstab: Bravo faces away from Alpha -> one swing kills.
+  hold(a, 0.6);
+  place(b, spot.x, spot.z - 1.4, 0); // a at (x, z) looking toward -z; b ahead, also looking toward -z (away)
+  cmd(a, { yaw: faceYaw(a, b), b: BTN.FIRE });
+  const backstabKill = !b.alive;
+  if (!backstabKill) failures.push(`backstab did not kill (hp ${b.hp})`);
+  const pack = game.pickups[game.pickups.length - 1];
+  if (pack && KNIFE_IDS.some((id) => pack.ammo[id] !== undefined)) failures.push('a knife ended up in the ammo drop');
+  const killEv = game.events.find((ev) => ev.type === 'kill' && ev.v === b.id);
+  if (!killEv || killEv.w !== 'knife') failures.push('kill not credited to the knife');
+  // Swinging while sprinting works (guns can't fire mid-sprint).
+  place(b, spot.x, spot.z - 1.5, 0); b.alive = true; b.motor.yaw = faceYaw(b, a);
+  hold(a, 0.6);
+  game.events.length = 0;
+  cmd(a, { yaw: faceYaw(a, b), mz: 1, b: BTN.FIRE | BTN.SPRINT });
+  if (!swings(a)) failures.push('could not swing while sprinting');
+
+  // Gun Game: everyone has a knife, and a knife kill knocks the victim down a weapon.
+  const gg = new Host({ mode: 'gungame', map: 'outpost', bots: 0, difficulty: 'normal' }, { send: () => {} });
+  const ga = gg.join('a', 'Alpha', { set: 'assault', ability: 'dash' });
+  const gb = gg.join('b', 'Bravo', { set: 'assault', ability: 'dash' });
+  for (let t = 0; t < 6; t += 0.1) gg.update(0.1);
+  if (ga.ws.slots.length !== 2 || ga.ws.slots[1].id !== 'knife') failures.push(`gun game loadout ${ga.ws.slots.map((s) => s.id)}`);
+  gb.tier = 3;
+  gg.game.kill(gb, ga, 'knife', false);
+  if (gb.tier !== 2) failures.push(`gun game knife kill left the victim on tier ${gb.tier}`);
+
+  // Bots pull knives at point blank (and when out of ammo) and use them.
+  const botHost = new Host({ mode: 'ffa', map: 'crossfire', bots: 9, difficulty: 'hard' }, { send: () => {} });
+  let botSwings = 0, botKnifeKills = 0;
+  const orig = botHost.game.event.bind(botHost.game);
+  botHost.game.event = (ev, ex) => { if (ev.type === 'mel') botSwings++; if (ev.type === 'kill' && WEAPONS[ev.w] && WEAPONS[ev.w].melee) botKnifeKills++; return orig(ev, ex); };
+  for (let t = 0; t < 240; t += 0.1) botHost.update(0.1);
+  if (!botSwings) failures.push('bots never used their knives in 4 minutes');
+  console.log(`knives: ${KNIFE_IDS.map((id) => `${WEAPONS[id].name} ${WEAPONS[id].swing}s/${WEAPONS[id].damage}`).join(', ')}`);
+  console.log(`knives: hit ${hit1}, swings/s combat ${aSwings} karambit ${kSwings}, backstab kill ${backstabKill}; bots: ${botSwings} swings, ${botKnifeKills} knife kills`);
+  if (failures.length) { console.log('KNIFE FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('knife checks passed');
 }

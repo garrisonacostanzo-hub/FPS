@@ -2,7 +2,7 @@
 // moody studio, with dust in the light, slow camera drift and a weapon close-up for the Armory.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { animateCamos, buildGun, buildOperator } from './models.js';
+import { animateCamos, buildWeapon, buildOperator } from './models.js';
 import { surfaceTextures } from './textures.js';
 
 export class MenuShowcase {
@@ -109,12 +109,12 @@ export class MenuShowcase {
     op.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
     op.root.rotation.y = Math.PI * 0.82;
     op.armPivot.rotation.x = -0.12;
-    const gun = buildGun(this.look.weapon, 1, this.look.camo, true);
+    const gun = buildWeapon(this.look.weapon, 1, this.look.camo, true);
     gun.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     op.gunSocket.add(gun);
     this.op = op;
     this.operatorAnchor.add(op.root);
-    const big = buildGun(this.look.weapon, 1.7, this.look.camo, true);
+    const big = buildWeapon(this.look.weapon, 1.7, this.look.camo, true);
     this.weaponAnchor.add(big);
     this.bigGun = big;
   }

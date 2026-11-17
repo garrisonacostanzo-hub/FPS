@@ -57,22 +57,52 @@ export const WEAPONS = {
   },
 };
 
+// KNIVES (slot 5 of every weapon set, key 5). Each set has its own: from fast and light to slow and heavy.
+//   swing: seconds between swings · damage per hit (100 HP: 34+ = 3 hits, 50+ = 2 hits, 100 = 1 hit)
+//   reach: metres from your eyes · moveMul: running speed with it out. A hit from behind (backstab) always kills.
+const knife = (id, name, swing, damage, reach, moveMul, equip, shape, color, accent) => ({
+  id, name, melee: true, shape, swing, reach, muzzleVel: 1000, drag: 0.1, pen: 0, chamber: false, slot: 2, mode: 'auto',
+  rpm: 60 / swing, damage, headMul: 1, pellets: 1,
+  hip: 0, ads: 0, move: 0, air: 0, bloom: 0, bloomMax: 0, bloomRecover: 1,
+  recoil: [0, 0], recoilH: 0, mag: 1, reserve: 0, reload: 0, reloadEmpty: 0,
+  range: reach, falloff: [99, 99, 1], adsFov: 70, adsTime: 0.1, moveMul, equip,
+  sound: 'knife', color, accent, size: [0.03, 0.05, 0.3], barrel: 0, botRange: [0, reach * 0.85],
+});
+export const KNIVES = {
+  karambit: knife('karambit', 'Karambit', 0.28, 35, 1.7, 1.1, 0.18, 'karambit', '#1d1f22', '#b98cff'),
+  stiletto: knife('stiletto', 'Stiletto', 0.34, 42, 1.8, 1.12, 0.2, 'stiletto', '#1f2226', '#9fd3ff'),
+  knife: knife('knife', 'Combat Knife', 0.45, 55, 2.0, 1.06, 0.25, 'combat', '#23262a', '#e8862a'),
+  bayonet: knife('bayonet', 'Bayonet', 0.58, 65, 2.4, 1.02, 0.3, 'bayonet', '#2b2e2a', '#d4c34a'),
+  machete: knife('machete', 'Machete', 0.75, 80, 2.6, 1.0, 0.35, 'machete', '#2a2522', '#c0392b'),
+  hatchet: knife('hatchet', 'Hatchet', 1.0, 100, 2.2, 0.95, 0.45, 'hatchet', '#3a2a1c', '#8bc34a'),
+};
+Object.assign(WEAPONS, KNIVES);
+export const KNIFE_IDS = Object.keys(KNIVES);
+export const isMelee = (id) => !!(WEAPONS[id] && WEAPONS[id].melee);
+
 export const PRIMARY_WEAPONS = ['rifle', 'smg', 'shotgun', 'lmg', 'dmr', 'sniper'];
 
-// WEAPON SETS: you pick one of these fixed sets instead of single guns, and carry all four (slots 1-4).
+// WEAPON SETS: you pick one of these fixed sets instead of single guns, and carry all four guns (slots 1-4)
+// plus the set's knife (slot 5).
 export const WEAPON_SETS = [
-  { id: 'assault', name: 'Assault', guns: ['rifle', 'smg', 'shotgun', 'pistol'], blurb: 'Rifle for mid range, SMG and shotgun for close quarters.' },
-  { id: 'cqb', name: 'Close Quarters', guns: ['smg', 'shotgun', 'dmr', 'pistol'], blurb: 'Fast and close, with a DMR for picking people off at range.' },
-  { id: 'breacher', name: 'Breacher', guns: ['shotgun', 'smg', 'lmg', 'pistol'], blurb: 'Clear rooms with the shotgun, hold lanes with the LMG.' },
-  { id: 'heavy', name: 'Heavy', guns: ['lmg', 'rifle', 'shotgun', 'pistol'], blurb: 'Sustained fire: a huge LMG magazine backed by a rifle.' },
-  { id: 'marksman', name: 'Marksman', guns: ['dmr', 'rifle', 'smg', 'pistol'], blurb: 'Precise mid-to-long range with an SMG for emergencies.' },
-  { id: 'recon', name: 'Recon', guns: ['sniper', 'dmr', 'smg', 'pistol'], blurb: 'Long range: sniper and DMR, SMG when they get close.' },
+  { id: 'assault', name: 'Assault', guns: ['rifle', 'smg', 'shotgun', 'pistol'], knife: 'knife', blurb: 'Rifle for mid range, SMG and shotgun for close quarters.' },
+  { id: 'cqb', name: 'Close Quarters', guns: ['smg', 'shotgun', 'dmr', 'pistol'], knife: 'karambit', blurb: 'Fast and close, with a DMR for picking people off at range.' },
+  { id: 'breacher', name: 'Breacher', guns: ['shotgun', 'smg', 'lmg', 'pistol'], knife: 'machete', blurb: 'Clear rooms with the shotgun, hold lanes with the LMG.' },
+  { id: 'heavy', name: 'Heavy', guns: ['lmg', 'rifle', 'shotgun', 'pistol'], knife: 'hatchet', blurb: 'Sustained fire: a huge LMG magazine backed by a rifle.' },
+  { id: 'marksman', name: 'Marksman', guns: ['dmr', 'rifle', 'smg', 'pistol'], knife: 'bayonet', blurb: 'Precise mid-to-long range with an SMG for emergencies.' },
+  { id: 'recon', name: 'Recon', guns: ['sniper', 'dmr', 'smg', 'pistol'], knife: 'stiletto', blurb: 'Long range: sniper and DMR, SMG when they get close.' },
 ];
 export const DEFAULT_SET = 'assault';
 
 /** The weapon set with this id (falls back to the default set). */
 export function weaponSet(id) {
   return WEAPON_SETS.find((s) => s.id === id) || WEAPON_SETS[0];
+}
+
+/** Everything a set carries: its four guns, then its knife. */
+export function carriedWeapons(id) {
+  const set = weaponSet(id);
+  return [...set.guns, set.knife];
 }
 export const SECONDARY_WEAPONS = ['pistol'];
 export const BOT_PRIMARY_POOL = ['rifle', 'rifle', 'rifle', 'smg', 'smg', 'shotgun', 'lmg', 'dmr', 'sniper'];
@@ -133,14 +163,14 @@ export function currentSpread(ws, speed01, grounded, crouched, aim01) {
 
 export function canFire(ws, now) {
   const slot = ws.slots[ws.active];
-  return !!slot && !ws.reloading && slot.mag > 0 && now >= ws.nextFire && now >= ws.equipEnd;
+  return !!slot && !ws.reloading && (slot.mag > 0 || isMelee(slot.id)) && now >= ws.nextFire && now >= ws.equipEnd;
 }
 
 /** Consumes a round and advances timing. Assumes canFire() was true. */
 export function consumeShot(ws, now) {
   const w = activeWeapon(ws);
   const slot = ws.slots[ws.active];
-  slot.mag--;
+  if (!w.melee) slot.mag--; // knives never run out
   const interval = secondsPerShot(w);
   ws.nextFire = now - ws.nextFire < 0.034 ? ws.nextFire + interval : now + interval;
   ws.bloom = Math.min(w.bloomMax, ws.bloom + w.bloom);
@@ -151,7 +181,7 @@ export function canReload(ws) {
   const slot = ws.slots[ws.active];
   if (!slot || ws.reloading) return false;
   const w = WEAPONS[slot.id];
-  return slot.mag < w.mag && slot.reserve > 0;
+  return !w.melee && slot.mag < w.mag && slot.reserve > 0;
 }
 
 export function startReload(ws, now) {

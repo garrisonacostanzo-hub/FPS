@@ -266,6 +266,109 @@ export function buildGun(weaponId, scale = 1, camoId = 'default', detailed = tru
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Knives
+// ---------------------------------------------------------------------------------------------------------------
+// Blade outlines in metres: x forward from the guard, y up (edge at the bottom). Extruded to the blade thickness.
+const BLADES = {
+  combat: { pts: [[0, -0.013], [0.12, -0.014], [0.165, -0.004], [0.175, 0.002], [0.15, 0.009], [0.118, 0.016], [0, 0.016]], t: 0.0045, handle: 0.11 },
+  karambit: { pts: [[0, 0.011], [0.035, 0.012], [0.07, 0.004], [0.098, -0.014], [0.116, -0.036], [0.12, -0.052], [0.104, -0.036], [0.08, -0.018], [0.05, -0.009], [0, -0.008]], t: 0.004, handle: 0.095, ring: true },
+  stiletto: { pts: [[0, -0.009], [0.15, -0.004], [0.205, 0], [0.15, 0.004], [0, 0.009]], t: 0.004, handle: 0.12 },
+  bayonet: { pts: [[0, -0.014], [0.17, -0.014], [0.215, -0.002], [0.222, 0.003], [0.19, 0.011], [0.15, 0.017], [0, 0.017]], t: 0.005, handle: 0.12, ring: true, fuller: true },
+  machete: { pts: [[0, -0.02], [0.2, -0.026], [0.34, -0.028], [0.395, -0.012], [0.4, 0.008], [0.37, 0.026], [0, 0.022]], t: 0.0035, handle: 0.13 },
+  hatchet: { pts: [[0.29, -0.02], [0.35, -0.022], [0.38, -0.06], [0.395, -0.075], [0.405, 0.05], [0.385, 0.06], [0.355, 0.03], [0.29, 0.024]], t: 0.012, handle: 0, haft: 0.38 },
+};
+const bladeGeoCache = new Map();
+function bladeGeometry(shape) {
+  if (bladeGeoCache.has(shape)) return bladeGeoCache.get(shape);
+  const b = BLADES[shape];
+  const s2 = new THREE.Shape();
+  b.pts.forEach(([x, y], i) => (i ? s2.lineTo(x, y) : s2.moveTo(x, y)));
+  s2.closePath();
+  const geo = new THREE.ExtrudeGeometry(s2, { depth: b.t, bevelEnabled: true, bevelThickness: b.t * 0.35, bevelSize: 0.0015, bevelSegments: 1, curveSegments: 4 });
+  geo.translate(0, 0, -b.t / 2);
+  geo.rotateY(Math.PI / 2); // shape x -> -Z (forward), extrusion -> X (thickness)
+  geo.computeVertexNormals();
+  bladeGeoCache.set(shape, geo);
+  return geo;
+}
+
+/**
+ * Knife model: the grip is at the origin, the blade points to -Z (forward), the edge faces -Y.
+ * userData: { muzzle (blade tip), melee: true, length } so it drops in wherever a gun goes.
+ */
+export function buildKnife(weaponId, scale = 1, camoId = 'default', detailed = true) {
+  const w = WEAPONS[weaponId] || WEAPONS.knife;
+  const shape = w.shape || 'combat';
+  const b = BLADES[shape];
+  const g = new THREE.Group();
+  const steel = mat(shape === 'karambit' || shape === 'combat' ? '#2b2f35' : '#9aa3ad', { rough: 0.28, metal: 0.95 });
+  const edge = mat('#d8dee6', { rough: 0.18, metal: 1 });
+  const grip = camoId && camoId !== 'default' ? camoMaterial(camoId) : mat(w.color, { rough: 0.85, metal: 0.05 });
+  const accent = mat(w.accent, { rough: 0.5, metal: 0.4 });
+  const blade = new THREE.Mesh(bladeGeometry(shape), steel);
+  blade.castShadow = true;
+  g.add(blade);
+  if (shape === 'hatchet') {
+    // Wooden haft with a wrapped grip, head at the far end.
+    const wood = mat('#6b4a2b', { rough: 0.8 });
+    add(g, rbox(0.024, 0.032, b.haft, 0.4), wood, 0, 0, -b.haft / 2 + 0.06);
+    add(g, rbox(0.028, 0.036, 0.12, 0.4), grip, 0, 0, 0.0);
+    add(g, rbox(0.03, 0.05, 0.05, 0.3), steel, 0, 0.005, -0.31);
+    if (detailed) add(g, rbox(0.004, 0.11, 0.008), edge, 0, -0.005, -0.4);
+  } else {
+    // Handle behind the guard, pommel at the back.
+    const hl = b.handle;
+    add(g, rbox(0.022, 0.03, hl, 0.45), grip, 0, -0.002, hl / 2);
+    if (detailed) for (let i = 1; i < 4; i++) add(g, rbox(0.024, 0.032, 0.005, 0.3), accent, 0, -0.002, hl * (i / 4));
+    add(g, rbox(0.026, 0.034, 0.012, 0.3), steel, 0, -0.002, hl + 0.004);
+    if (shape !== 'karambit' && shape !== 'machete') add(g, rbox(0.03, 0.05, 0.008, 0.3), steel, 0, 0.0, 0); // guard
+    if (b.ring) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(shape === 'karambit' ? 0.017 : 0.012, 0.004, 6, 16), steel);
+      if (shape === 'karambit') { ring.position.set(0, -0.002, hl + 0.022); ring.rotation.y = Math.PI / 2; } // finger ring
+      else ring.position.set(0, 0.03, 0.0); // bayonet muzzle ring above the guard
+      g.add(ring);
+    }
+    if (detailed && b.fuller) add(g, rbox(b.t * 1.4, 0.004, 0.12), edge, 0, 0.004, -0.08);
+    if (detailed) {
+      // Bright bevel along the cutting edge.
+      const tip = b.pts.reduce((m, p) => (p[0] > m[0] ? p : m), [0, 0]);
+      add(g, rbox(b.t * 1.2, 0.003, tip[0] * 0.8), edge, 0, b.pts[0][1] + 0.002, -tip[0] * 0.42);
+    }
+  }
+  const tipX = b.pts.reduce((m, p) => Math.max(m, p[0]), 0);
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0, -tipX);
+  g.add(muzzle);
+  g.userData = { muzzle, flash: null, sightY: 0, sightZ: 0, length: (tipX + (b.handle || 0.1)) * scale, melee: true, shape };
+  g.scale.setScalar(scale);
+  return g;
+}
+
+/** Any weapon's model: a gun, or a knife for melee weapons. */
+export function buildWeapon(weaponId, scale = 1, camoId = 'default', detailed = true) {
+  return WEAPONS[weaponId] && WEAPONS[weaponId].melee ? buildKnife(weaponId, scale, camoId, detailed) : buildGun(weaponId, scale, camoId, detailed);
+}
+
+/** First-person right arm gripping a knife (the left hand stays out of view, ready to block). */
+export function buildKnifeArms(knife, opts) {
+  const look = outfitById(opts.outfit).look;
+  const sleeve = mat(look.vest === '#dfe6ec' ? '#cfd6dc' : shade(look.vest, 1.6), { rough: 0.9 });
+  const band = mat(opts.color, { rough: 0.6, emissive: 0.3 });
+  const glove = mat('#202226', { rough: 0.85 });
+  const arms = new THREE.Group();
+  const shape = knife.userData.shape;
+  const gripZ = shape === 'hatchet' ? 0.0 : 0.05;
+  const hand = v3(0.0, -0.004, gripZ);
+  const elbow = v3(0.16, -0.2, gripZ + 0.28), shoulder = v3(0.28, -0.34, gripZ + 0.7);
+  add(arms, sphere(0.05), glove, hand.x, hand.y, hand.z, 0, 0, 0, false).scale.set(1.0, 1.15, 1.45);
+  limb(arms, hand, elbow, 0.046, sleeve, false);
+  limb(arms, elbow, shoulder, 0.056, sleeve, false);
+  add(arms, cyl(0.05, 0.05, 0.03, 12), band, (hand.x + elbow.x) * 0.5, (hand.y + elbow.y) * 0.5, (hand.z + elbow.z) * 0.5, 1.2, 0, 0, false);
+  knife.add(arms);
+  return arms;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Operators
 // ---------------------------------------------------------------------------------------------------------------
 const outlineMats = new Map();

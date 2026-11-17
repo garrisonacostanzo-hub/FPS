@@ -78,7 +78,7 @@ export function stepCommand(actor, cmd, world, hooks) {
 
   let buttons = cmd.b | 0;
   const w = activeWeapon(ws);
-  const aiming = (buttons & BTN.AIM) !== 0 && !ws.reloading && actor.clock >= ws.equipEnd - w.equip * 0.5;
+  const aiming = !w.melee && (buttons & BTN.AIM) !== 0 && !ws.reloading && actor.clock >= ws.equipEnd - w.equip * 0.5;
   if (!aiming) buttons &= ~BTN.AIM;
   actor.aim01 = moveTowards(actor.aim01, aiming ? 1 : 0, dt / Math.max(0.05, w.adsTime));
   if (aiming) buttons &= ~BTN.SPRINT;
@@ -93,7 +93,8 @@ export function stepCommand(actor, cmd, world, hooks) {
   const fireHeld = (buttons & BTN.FIRE) !== 0;
   const pressed = fireHeld && !actor.prevFire;
   actor.prevFire = fireHeld;
-  if (!fireHeld || m.sprinting || actor.clock < actor.sprintLock) return;
+  // Guns can't fire mid-sprint; knives swing on the run.
+  if (!fireHeld || (!w.melee && (m.sprinting || actor.clock < actor.sprintLock))) return;
 
   const slot = ws.slots[ws.active];
   if (slot && slot.mag <= 0) {

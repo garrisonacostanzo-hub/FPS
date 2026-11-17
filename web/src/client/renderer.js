@@ -5,7 +5,7 @@ import { TEAM, TEAM_COLORS } from '../shared/constants.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { Effects } from './gfx/effects.js';
 import { addFoliage } from './gfx/foliage.js';
-import { animateCamos, buildFirstPersonArms, buildGun, buildOperator, mat } from './gfx/models.js';
+import { animateCamos, buildFirstPersonArms, buildKnifeArms, buildOperator, buildWeapon, mat } from './gfx/models.js';
 import { applyDancePose, clearDancePose, dancePose } from './gfx/dancepose.js';
 import { danceById } from '../shared/dances.js';
 import { PostFX } from './gfx/post.js';
@@ -216,8 +216,26 @@ class CharacterModel {
     if (this.weaponKey === key) return;
     this.weaponKey = key;
     if (this.weapon) this.gunSocket.remove(this.weapon);
-    this.weapon = buildGun(id, 1, this.info.camo, false);
+    this.weapon = buildWeapon(id, 1, this.info.camo, false);
     this.gunSocket.add(this.weapon);
+  }
+
+  /** Third-person knife swing (from the 'mel' event). */
+  slash(heavy) {
+    this.slashStart = performance.now();
+    this.slashHeavy = !!heavy;
+    this.slashDir = -(this.slashDir || 1);
+  }
+
+  /** Layered on the arms after the normal pose: a quick wind-up and strike. */
+  animateSlash() {
+    if (!this.slashStart) return;
+    const dur = this.slashHeavy ? 520 : 320;
+    const t = (performance.now() - this.slashStart) / dur;
+    if (t >= 1) { this.slashStart = 0; return; }
+    const strike = t < 0.25 ? -t / 0.25 : t < 0.55 ? -1 + 2 * ((t - 0.25) / 0.3) : 1 - (t - 0.55) / 0.45;
+    if (this.slashHeavy) this.armPivot.rotation.x += -0.9 * Math.max(0, -strike) + 0.8 * Math.max(0, strike);
+    else { this.armPivot.rotation.z += 0.55 * strike * this.slashDir; this.armPivot.rotation.x += 0.25 * Math.max(0, strike); this.body.rotation.y += 0.25 * strike * this.slashDir; }
   }
 
   setLabel(text, color) {
@@ -260,6 +278,7 @@ class CharacterModel {
     if (this.label) this.label.visible = p.alive && !this.cloaked;
     if (this.cloaked) this.marker.visible = false;
     this.animateEmote(p);
+    this.animateSlash();
     this.animateDance();
     return speed;
   }
@@ -750,6 +769,11 @@ export class GameRenderer {
     for (const id of [...this.characters.keys()]) if (!liveIds.has(id)) this.removeCharacter(id);
   }
 
+  characterSlash(id, heavy) {
+    const c = this.characters.get(id);
+    if (c) c.slash(heavy);
+  }
+
   characterMuzzle(id, out) {
     const c = this.characters.get(id);
     if (!c) return null;
@@ -791,8 +815,9 @@ export class GameRenderer {
     if (this.vmWeaponId === id && this.vmGun) return;
     this.vmWeaponId = id;
     if (this.vmGun) this.vmScene.remove(this.vmGun);
-    this.vmGun = buildGun(id, 0.55, this.localLook.camo, true);
-    buildFirstPersonArms(this.vmGun, { outfit: this.localLook.outfit, color: this.localLook.color, weapon: id });
+    this.vmGun = buildWeapon(id, WEAPONS[id] && WEAPONS[id].melee ? 0.9 : 0.55, this.localLook.camo, true);
+    if (this.vmGun.userData.melee) buildKnifeArms(this.vmGun, { outfit: this.localLook.outfit, color: this.localLook.color });
+    else buildFirstPersonArms(this.vmGun, { outfit: this.localLook.outfit, color: this.localLook.color, weapon: id });
     this.vmGun.traverse((o) => { o.castShadow = false; });
     this.vmScene.add(this.vmGun);
     this.vm = { kick: 0, kickV: 0, swayX: 0, swayY: 0, bob: 0, equipStart: performance.now(), reloadStart: 0, reloadDur: 0, sprint: 0 };
@@ -800,6 +825,14 @@ export class GameRenderer {
 
   viewModelFire() {
     if (!this.vm) return;
+    if (this.vmGun.userData.melee) {
+      // Knife: start a swing (alternating sides for slashes).
+      const w = WEAPONS[this.vmWeaponId];
+      this.vm.slashStart = performance.now();
+      this.vm.slashDur = Math.min(620, Math.max(240, w.swing * 850));
+      this.vm.slashDir = -(this.vm.slashDir || -1);
+      return;
+    }
     this.vm.kickV += 1;
     const f = this.vmGun.userData.flash;
     if (f) { f.visible = true; f.material.rotation = Math.random() * 6; f.scale.setScalar(0.26 + Math.random() * 0.12); this.vmFlashUntil = performance.now() + 45; }
@@ -840,6 +873,7 @@ export class GameRenderer {
     if (vm.reloadDur > 0 && now - vm.reloadStart < vm.reloadDur) reload = Math.sin(((now - vm.reloadStart) / vm.reloadDur) * Math.PI);
     if (!state.reloading) vm.reloadDur = vm.reloadDur > 0 && now - vm.reloadStart < vm.reloadDur ? vm.reloadDur : 0;
 
+    if (this.vmGun.userData.melee) { this.updateKnifeView(vm, w, state, now, equip, bobScale); return; }
     // Hip position, and aiming down sights with the sight line on the screen centre.
     const hip = new THREE.Vector3(0.13, -0.13, -0.4);
     const scoped = this.vmWeaponId === 'sniper' || this.vmWeaponId === 'dmr';
@@ -862,6 +896,43 @@ export class GameRenderer {
       if (f) f.visible = false;
       this.vmFlashUntil = 0;
     }
+  }
+
+  /**
+   * First-person knife: held low on the right, swung by style: slashes (combat knife, karambit, machete) sweep
+   * across the screen and alternate sides, stabs (stiletto, bayonet) thrust forward, the hatchet chops down.
+   */
+  updateKnifeView(vm, w, state, now, equip, bobScale) {
+    const style = w.shape === 'hatchet' ? 'chop' : w.shape === 'stiletto' || w.shape === 'bayonet' ? 'stab' : 'slash';
+    const hatchet = w.shape === 'hatchet';
+    const pos = new THREE.Vector3(this.knifePose ? this.knifePose[0] : hatchet ? 0.15 : 0.13, this.knifePose ? this.knifePose[1] : hatchet ? -0.17 : -0.12, this.knifePose ? this.knifePose[2] : hatchet ? -0.34 : -0.3);
+    const rot = new THREE.Euler(this.knifePose ? this.knifePose[3] : hatchet ? 0.85 : 0.35, this.knifePose ? this.knifePose[4] : hatchet ? 0.2 : 0.4, this.knifePose ? this.knifePose[5] : hatchet ? -0.2 : -0.6);
+    let wind = 0, strike = 0;
+    if (vm.slashStart) {
+      const t = (now - vm.slashStart) / vm.slashDur;
+      const ease = (x) => x * x * (3 - 2 * x);
+      if (t >= 1) vm.slashStart = 0;
+      else if (t < 0.18) wind = ease(t / 0.18);
+      else if (t < 0.5) { const k = ease((t - 0.18) / 0.32); wind = 1 - k; strike = k; }
+      else strike = 1 - ease((t - 0.5) / 0.5);
+    }
+    const d = vm.slashDir || 1;
+    if (style === 'slash') {
+      pos.x += 0.07 * wind * d - 0.22 * strike * d; pos.y += 0.05 * wind - 0.05 * strike; pos.z -= 0.1 * strike;
+      rot.y += 0.55 * wind * d - 0.95 * strike * d; rot.z += -0.45 * wind * d + 0.7 * strike * d; rot.x += 0.1 * wind - 0.15 * strike;
+    } else if (style === 'stab') {
+      pos.z += 0.07 * wind - 0.24 * strike; pos.x -= 0.06 * strike; pos.y += 0.03 * strike;
+      rot.y -= 0.38 * strike; rot.x -= 0.3 * strike; rot.z += 0.3 * strike;
+    } else {
+      pos.y += 0.16 * wind - 0.1 * strike; pos.z -= 0.1 * strike; pos.x -= 0.05 * strike;
+      rot.x += 0.75 * wind - 1.2 * strike;
+    }
+    pos.x += vm.swayX + Math.sin(vm.bob) * bobScale - 0.03 * vm.sprint;
+    pos.y += vm.swayY + Math.abs(Math.cos(vm.bob)) * bobScale * 1.4 - 0.06 * vm.sprint - 0.3 * equip * equip;
+    rot.x += 0.3 * vm.sprint - 0.8 * equip * equip;
+    this.vmGun.position.copy(pos);
+    this.vmGun.rotation.copy(rot);
+    this.vmGun.visible = state.alive;
   }
 
   /** Dynamic resolution: lower the internal resolution while frames are slow, raise it again when there is headroom. */

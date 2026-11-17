@@ -10,7 +10,7 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Friends:** add friends with a friend code, see who's online and when they last played, and look at their rank, stats and skins.
 * **Squads:** invite friends to your squad and play Ranked or any team mode together on the same team.
 * **Showdown:** 1v1 a friend, either rated on its own ladder or just for fun.
-* **Weapon sets:** pick one of six fixed sets of four guns, and carry all four.
+* **Weapon sets:** pick one of six fixed sets of four guns, and carry all four plus the set's own **knife** (key **5**). The six knives go from quick and light (Karambit) to slow and heavy (Hatchet, one-hit kill).
 * **Special abilities:** pick one of six (Dash, Stim, Frag Grenade, Smoke Grenade, Recon Pulse, Cloak) and use it with **F**.
 * **Ammo drops:** whoever dies drops all the ammo they had; walk over it to refill your guns.
 * **Emotes, quick chat, text chat and voice chat:** dance emotes with music on **B** (third-person camera), including **Crew Groove**, a group dance friends join with **Q**; quick chat callouts on **Z**; all and team chat; and push-to-talk voice in online matches.
@@ -189,6 +189,7 @@ The same file has touch controls. They turn on automatically when you touch the 
 | Crouch | **CROUCH** (tap to toggle) |
 | Jump / reload | **JUMP** / **RELOAD** |
 | Switch weapon | Tap the weapon and ammo panel (⇄) to go to the next gun in your set |
+| Knife | **🔪** above the ability button: knife out, tap again for your gun. FIRE swings |
 | Special ability | **⚡** button next to AIM (shows the seconds left while it recharges) |
 | Emotes and quick chat / text chat | **😀** (tabs at the top switch between EMOTES and QUICK CHAT) / **💬** at the top right |
 | Join a group dance | **👯 JOIN** (appears next to AIM while someone near you is doing Crew Groove) |
@@ -229,7 +230,7 @@ npm test          # headless simulation of every mode × map with bots (pathing,
 | **Team Deathmatch** | Two teams. The first team to the kill limit (50) wins. |
 | **Domination** | Capture zones A/B/C. Each zone held gives +1 point per second and each capture gives +5. First to 250 wins. |
 | **Free-for-All** | Everyone for themselves. First to 25 kills wins. |
-| **Gun Game** | Every kill moves you up the weapon ladder (pistol → SMG → shotgun → rifle → LMG → DMR → sniper → pistol). A suicide demotes you. The first player to finish the ladder wins. |
+| **Gun Game** | Every kill moves you up the weapon ladder (pistol → SMG → shotgun → rifle → LMG → DMR → sniper → pistol). Everyone also has a Combat Knife (key 5), and a knife kill knocks the victim down one weapon. A suicide demotes you. The first player to finish the ladder wins. |
 | **Elimination** | Rounds with no respawns. Wipe the enemy team to win a round. First to 4 rounds wins. |
 | **Horde (co-op)** | Your squad survives escalating waves of enemy bots. Fallen players return when a wave is cleared. |
 
@@ -254,6 +255,7 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 | Fire / Aim down sights | Left mouse / Right mouse: click to scope in, click again to scope out (Settings can switch to hold) |
 | Reload | `R` |
 | Switch weapon | `1` `2` `3` `4`, `Q` `E`, mouse wheel |
+| Knife | `5`, then click to swing (hold to keep swinging) |
 | Scoreboard | `Tab` |
 | Chat to everyone / team chat | `T` (or `Enter`) / `Y` (`Tab` while typing switches between them) |
 | Special ability | `F` |
@@ -404,18 +406,36 @@ To move your progress to another browser or device, use **BARRACKS → Backup co
 
 ## Weapons
 
-**Weapon sets.** You don't pick single guns. You pick one of six fixed sets and carry all four of its guns (slots 1-4):
+**Weapon sets.** You don't pick single guns. You pick one of six fixed sets and carry all four of its guns (slots 1-4) and its knife (slot 5):
 
-| Set | Guns (slot 1 → 4) | Style |
-|---|---|---|
-| **Assault** | Rifle, SMG, Shotgun, Pistol | Rifle for mid range, SMG and shotgun close up |
-| **Close Quarters** | SMG, Shotgun, DMR, Pistol | Fast and close, DMR for picks at range |
-| **Breacher** | Shotgun, SMG, LMG, Pistol | Clear rooms, hold lanes |
-| **Heavy** | LMG, Rifle, Shotgun, Pistol | Sustained fire |
-| **Marksman** | DMR, Rifle, SMG, Pistol | Precise mid-to-long range |
-| **Recon** | Sniper, DMR, SMG, Pistol | Long range with a close backup |
+| Set | Guns (slot 1 → 4) | Knife (slot 5) | Style |
+|---|---|---|---|
+| **Assault** | Rifle, SMG, Shotgun, Pistol | Combat Knife | Rifle for mid range, SMG and shotgun close up |
+| **Close Quarters** | SMG, Shotgun, DMR, Pistol | Karambit | Fast and close, DMR for picks at range |
+| **Breacher** | Shotgun, SMG, LMG, Pistol | Machete | Clear rooms, hold lanes |
+| **Heavy** | LMG, Rifle, Shotgun, Pistol | Hatchet | Sustained fire |
+| **Marksman** | DMR, Rifle, SMG, Pistol | Bayonet | Precise mid-to-long range |
+| **Recon** | Sniper, DMR, SMG, Pistol | Stiletto | Long range with a close backup |
 
-Choose the set on the PLAY / ONLINE tabs or in **ARMORY → WEAPON SETS**. In a match, change it from the pause menu: it applies when you next respawn. Gun Game ignores sets and uses its own ladder. Bots also carry sets and switch to the gun that suits the distance to their target.
+**Knives.** Press **5** (or scroll / Q / E to it; on a phone, tap **🔪**, and tap it again to go back to your gun) and click to swing. Hold the button to keep swinging. Every set's knife is different. The quick ones swing fast for less damage, the heavy ones are slow but hit hard and reach further:
+
+| Knife | Set | Swing | Damage | Hits to kill | Reach | Running speed |
+|---|---|---|---|---|---|---|
+| 🔪 **Karambit** | Close Quarters | 0.28 s (fastest) | 35 | 3 | 1.7 m | +10% |
+| 🔪 **Stiletto** | Recon | 0.34 s | 42 | 3 | 1.8 m | +12% (fastest) |
+| 🔪 **Combat Knife** | Assault | 0.45 s | 55 | 2 | 2.0 m | +6% |
+| 🔪 **Bayonet** | Marksman | 0.58 s | 65 | 2 | 2.4 m | +2% |
+| 🔪 **Machete** | Breacher | 0.75 s | 80 | 2 | 2.6 m (longest) | normal |
+| 🔪 **Hatchet** | Heavy | 1.0 s (slowest) | 100 | **1** | 2.2 m | -5% |
+
+* **Backstab:** a hit from behind (you're in their back 120°) always kills, with any knife. "BACKSTAB!" shows when you land one.
+* You can swing **while sprinting**, and running with a knife out is faster than with any gun. A knife never needs ammo or a reload.
+* The hit goes where your crosshair is (head or body, within reach). If you're slightly off, it still lands on an enemy in a narrow cone in front of you. Walls block it. Hits use the same lag compensation as bullets, so what you see is what you hit online.
+* Each knife has its own model and swing: slashes that alternate sides (Karambit, Combat Knife, Machete), forward stabs (Stiletto, Bayonet) and an overhead chop (Hatchet). Everyone sees the swing in third person, and hears the whoosh, the hit and the "shing" when you draw it.
+* Knife kills show **🔪** in the kill feed. Knives don't go into ammo drops.
+* Bots go for their knife at point blank (especially mid-reload) or when every gun is empty, and run at you to use it.
+
+Choose the set on the PLAY / ONLINE tabs or in **ARMORY → WEAPON SETS** (which shows each knife's damage, swing speed, reach and mobility). In a match, change it from the pause menu: it applies when you next respawn. Gun Game ignores sets and uses its own ladder (plus a Combat Knife). Bots also carry sets and switch to the gun that suits the distance to their target.
 
 **Ammo drops.** Whoever dies (players and bots) drops everything they were carrying as a glowing ammo can, which lasts 30 seconds. The first living player to walk over it takes it:
 * rounds for a gun you also carry go straight into its reserve
@@ -536,7 +556,7 @@ web/
    │  ├─ math.js            # vector/angle helpers, seeded RNG, ray tests
    │  ├─ world.js           # AABB collision world + raycasts (grid broadphase)
    │  ├─ movement.js        # player motor: walk/sprint/crouch/jump, step-up, coyote time
-   │  ├─ weapons.js         # weapon data table, the six weapon sets, fire/reload/switch state machine
+   │  ├─ weapons.js         # weapon data table, the six knives, the six weapon sets, fire/reload/switch state machine
    │  ├─ sim.js             # per-command step (movement + weapons), hitboxes, packing
    │  ├─ map.js             # procedural map builders, zones, spawns, cover points
    │  ├─ nav.js             # 2.5D nav grid + A* + path smoothing

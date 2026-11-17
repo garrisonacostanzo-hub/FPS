@@ -14,7 +14,7 @@ import { createMode } from './modes.js';
 import { createMotorState, eyeHeightOf } from './movement.js';
 import { NavGrid } from './nav.js';
 import { NOISE, hitboxesAt, packActor, stepCommand } from './sim.js';
-import { WEAPONS, WEAPON_SETS, weaponSet, createWeaponState, damageAt, refillWeapons, setLoadout, spreadDirection } from './weapons.js';
+import { WEAPONS, WEAPON_SETS, carriedWeapons, createWeaponState, damageAt, refillWeapons, setLoadout, spreadDirection } from './weapons.js';
 import { World } from './world.js';
 
 const HISTORY_LEN = Math.ceil(HISTORY_SECONDS * TICK_RATE) + 4;
@@ -152,8 +152,8 @@ export class Game {
   createEntity({ name, isBot, team, loadout, clientId, cosmetics, ability }) {
     const id = this.nextId++;
     const look = isBot ? botCosmetics(this.rng) : cosmetics || {};
-    // A weapon set id (players) or a random set (bots): everyone carries the set's four guns.
-    const guns = weaponSet(isBot ? WEAPON_SETS[Math.floor(this.rng() * WEAPON_SETS.length)].id : loadout).guns;
+    // A weapon set id (players) or a random set (bots): everyone carries the set's four guns and its knife.
+    const guns = carriedWeapons(isBot ? WEAPON_SETS[Math.floor(this.rng() * WEAPON_SETS.length)].id : loadout);
     const e = {
       id, name, isBot, clientId,
       camo: sanitizeCamo(look.camo), outfit: sanitizeOutfit(look.outfit),
@@ -289,7 +289,7 @@ export class Game {
   /** Weapon set for the next respawn. */
   setPreferredSet(e, setId) {
     if (!WEAPON_SETS.some((s) => s.id === setId)) return;
-    e.loadoutPref = weaponSet(setId).guns.slice();
+    e.loadoutPref = carriedWeapons(setId);
   }
 
   // ==============================================================================================
@@ -503,6 +503,7 @@ export class Game {
     const w = shot.weapon;
     shooter.lastFire = this.time;
     if (shooter.cloakUntil > this.time) shooter.cloakUntil = 0; // shooting breaks cloak
+    if (w.melee) { this.resolveMelee(shooter, shot); return; }
     const viewTime = shooter.isBot ? this.time : clamp(shooter.currentCmd ? shooter.currentCmd.vt : this.time, this.time - MAX_REWIND, this.time);
     const offset = this.time - viewTime;
     const pellets = Math.max(1, w.pellets);
@@ -518,6 +519,74 @@ export class Game {
     if (this.bullets.length > 600) this.bullets.splice(0, this.bullets.length - 600);
     this.noise(shot.ox, shot.oy, shot.oz, NOISE[w.id] || 70, 'gun', shooter);
     this.event({ type: 'shot', s: shooter.id, w: w.id, o: [r2(shot.ox), r2(shot.oy), r2(shot.oz)], d: dirs }, shooter.isBot ? null : shooter.id);
+  }
+
+  /**
+   * A knife swing. The target is whoever your crosshair is on within the knife's reach (head or body, with the
+   * same lag compensation as bullets), or, if the crosshair is just off them, the nearest enemy in a narrow cone
+   * in front of you. A wall in between blocks it. From behind (you're in their back 120 degrees) it always kills.
+   */
+  resolveMelee(attacker, shot) {
+    const w = shot.weapon;
+    const viewTime = attacker.isBot ? this.time : clamp(attacker.currentCmd ? attacker.currentCmd.vt : this.time, this.time - MAX_REWIND, this.time);
+    const pose = { x: 0, y: 0, z: 0, c: 0, alive: true };
+    const hb = {};
+    const ox = shot.ox, oy = shot.oy, oz = shot.oz, dx = shot.dx, dy = shot.dy, dz = shot.dz;
+    let best = null, bestScore = Infinity, hitPoint = null, material = -1;
+    for (const o of this.entities.values()) {
+      if (o === attacker || !o.alive || !this.mode.isHostile(attacker, o)) continue;
+      if (Math.abs(o.motor.x - ox) > w.reach + 2 || Math.abs(o.motor.z - oz) > w.reach + 2) continue;
+      this.poseAt(o, viewTime, pose);
+      if (!pose.alive) continue;
+      hitboxesAt(pose.x, pose.y, pose.z, pose.c, hb);
+      // 1. Exactly on target: the aim ray touches their head or body within reach.
+      let t = raySphere(ox, oy, oz, dx, dy, dz, hb.hx, hb.hy, hb.hz, hb.hr + 0.08);
+      let head = t >= 0 && t <= w.reach;
+      if (!head) t = rayBox(ox, oy, oz, dx, dy, dz, hb.minx - 0.1, hb.miny, hb.minz - 0.1, hb.maxx + 0.1, hb.maxy + 0.1, hb.maxz + 0.1, w.reach, null);
+      let score;
+      if (t >= 0 && t <= w.reach) score = t;
+      else {
+        // 2. Near miss: centre of the chest within reach and within ~28 degrees of where you're looking.
+        const cx = pose.x - ox, cy = (hb.miny + hb.maxy) * 0.5 - oy, cz = pose.z - oz;
+        const d = Math.hypot(cx, cy, cz);
+        if (d > w.reach + 0.35) continue;
+        const cos = (cx * dx + cy * dy + cz * dz) / (d || 1);
+        if (cos < 0.88 && d > 0.9) continue;
+        score = d + 1; t = Math.max(0, d - 0.3); head = false;
+      }
+      // Walls in between block the knife.
+      const lx = pose.x - ox, ly = hb.hy - 0.45 - oy, lz = pose.z - oz;
+      const ll = Math.hypot(lx, ly, lz) || 1;
+      const wall = this.world.raycast(ox, oy, oz, lx / ll, ly / ll, lz / ll, ll);
+      if (wall && wall.box) continue;
+      if (score < bestScore) { bestScore = score; best = o; hitPoint = head ? [hb.hx, hb.hy, hb.hz] : [ox + dx * t, oy + dy * t, oz + dz * t]; }
+    }
+    let result = 0;
+    if (best) {
+      // Backstab: the attacker stands in the victim's rear arc.
+      const fx = -Math.sin(best.motor.yaw), fz = -Math.cos(best.motor.yaw);
+      const ax = attacker.motor.x - best.motor.x, az = attacker.motor.z - best.motor.z;
+      const al = Math.hypot(ax, az) || 1;
+      const backstab = (fx * ax + fz * az) / al < -0.5;
+      const before = best.hp;
+      const amount = backstab ? Math.max(before, best.maxHp) + 1 : w.damage;
+      this.damage(best, amount, attacker, w.id, false, ox, oy, oz);
+      const dealt = before - Math.max(0, best.hp);
+      if (dealt > 0) {
+        result = backstab ? 2 : 1;
+        if (!attacker.isBot) this.eventTo(attacker, { type: 'hit', d: Math.round(dealt), hs: 0, k: best.alive ? 0 : 1, bs: backstab ? 1 : 0, ml: 1 });
+      }
+    } else {
+      // A swing at a wall right in front of you clinks off it.
+      const wh = this.world.raycast(ox, oy, oz, dx, dy, dz, w.reach);
+      if (wh) { result = 3; hitPoint = [ox + dx * wh.t, oy + dy * wh.t, oz + dz * wh.t]; material = wh.box ? MATERIAL_IDS.indexOf(wh.box.m) : -1; }
+    }
+    this.noise(ox, oy, oz, result === 1 || result === 2 ? 14 : 8, 'gun', attacker);
+    // Everyone sees the swing (third-person slash) and hears it; h: 0 miss, 1 hit, 2 backstab, 3 wall.
+    const ev = { type: 'mel', s: attacker.id, w: w.id, h: result };
+    if (hitPoint) ev.p = [r2(hitPoint[0]), r2(hitPoint[1]), r2(hitPoint[2])];
+    if (result === 3) ev.m = material;
+    this.event(ev);
   }
 
   /** Moves every bullet two integration steps per tick and resolves hits, penetration and near misses. */
@@ -641,6 +710,7 @@ export class Game {
     const ammo = {};
     let total = 0;
     for (const s of victim.ws.slots) {
+      if (WEAPONS[s.id] && WEAPONS[s.id].melee) continue; // knives stay with their owner
       const n = s.mag + s.reserve;
       if (n > 0) { ammo[s.id] = (ammo[s.id] || 0) + n; total += n; }
     }

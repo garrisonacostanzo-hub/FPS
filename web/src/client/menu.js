@@ -44,6 +44,12 @@ const TABS = [['play', 'PLAY'], ['ranked', 'RANKED'], ['friends', 'FRIENDS'], ['
 const PLAYLIST = MODE_LIST.filter((m) => !m.hidden);
 const MODE_ART = { tdm: '⚔', dom: '⚑', ffa: '✦', gungame: '⬆', elim: '☠', horde: '⛨' };
 
+/** One line about a knife: swing time, damage, hits to kill and reach. */
+function knifeLine(k) {
+  const hits = Math.ceil(100 / k.damage);
+  return `${k.swing}S SWING · ${k.damage} DMG (${hits === 1 ? 'ONE-HIT KILL' : hits + ' HITS'}) · ${k.reach} M REACH`;
+}
+
 export class MainMenu {
   constructor(root, { onStartOffline, onStartRanked, onStartSquad, onJoinSquadMatch, onHost, onJoin, audio, showcase }) {
     this.root = root;
@@ -236,7 +242,7 @@ export class MainMenu {
 
   weaponField() {
     const cur = weaponSet(settings.weaponSet);
-    return `<div class="m-field"><label>WEAPON SET <output>${cur.guns.map((g) => esc(WEAPONS[g].name.split(' ')[0].toUpperCase())).join(' · ')}</output></label>
+    return `<div class="m-field"><label>WEAPON SET <output>${cur.guns.map((g) => esc(WEAPONS[g].name.split(' ')[0].toUpperCase())).join(' · ')} · 🔪 ${esc(WEAPONS[cur.knife].name.toUpperCase())}</output></label>
       <div class="m-chips">${WEAPON_SETS.map((ws) => `<button class="${cur.id === ws.id ? 'on' : ''}" data-wset="${ws.id}">${esc(ws.name.toUpperCase())}</button>`).join('')}</div></div>
       ${this.abilityField()}`;
   }
@@ -386,7 +392,7 @@ export class MainMenu {
             <div class="m-reward"><span class="m-swatch" style="background-image:url(${camoSwatch(c.id)})"></span>
               <div><b style="color:${RARITY[c.rarity].color}">${c.name.toUpperCase()}</b><small>${esc(req.text)}</small>
               <div class="m-bar thin"><i style="width:${pct(req.have, req.need)}%"></i></div></div></div>`).join('')}</div>` : ''}
-          <p class="m-note">Ability: <b>${abilityById(settings.ability).icon} ${esc(abilityById(settings.ability).name)}</b> · Weapon set: <b>${esc(weaponSet(settings.weaponSet).name)}</b> (${weaponSet(settings.weaponSet).guns.map((g) => esc(WEAPONS[g].name)).join(', ')}) · camo <b>${esc(camoName(profile.equipped.camo))}</b>. Change them in the Armory.</p>
+          <p class="m-note">Ability: <b>${abilityById(settings.ability).icon} ${esc(abilityById(settings.ability).name)}</b> · Weapon set: <b>${esc(weaponSet(settings.weaponSet).name)}</b> (${[...weaponSet(settings.weaponSet).guns, weaponSet(settings.weaponSet).knife].map((g) => esc(WEAPONS[g].name)).join(', ')}) · camo <b>${esc(camoName(profile.equipped.camo))}</b>. Change them in the Armory.</p>
           ${social.squadSize > 1 ? this.squadNote('ranked') + this.squadStartButton('start-ranked', 'RANKED TDM · 5V5', social.squadSize > SQUAD_TEAM_SIZE.ranked ? `Your squad has ${social.squadSize} players but Ranked allows ${SQUAD_TEAM_SIZE.ranked} per team.` : '')
             : `<button class="m-start" id="start-ranked" ${this.webgl ? '' : 'disabled'}><b>PLAY RANKED</b><small>TEAM DEATHMATCH · 5V5</small></button>`}
         </section>
@@ -546,13 +552,16 @@ export class MainMenu {
             const w = WEAPONS[g];
             const dps = Math.round((w.damage * w.pellets * w.rpm) / 60);
             return `<li><em>${i + 1}</em><span>${esc(w.name.toUpperCase())}</span><small>${w.mode.toUpperCase()} · ${dps} DPS · ${w.falloff[1]} M</small></li>`;
-          }).join('')}</ol>
+          }).join('')}<li class="knife"><em>5</em><span>🔪 ${esc(WEAPONS[ws.knife].name.toUpperCase())}</span><small>${knifeLine(WEAPONS[ws.knife])}</small></li></ol>
         </button>`).join('')}</div>`;
       const cur = weaponSet(settings.weaponSet);
       detail = `<h1>${esc(cur.name.toUpperCase())}</h1>
-        <p class="m-desc">${esc(cur.blurb)} You carry all four guns: switch with <b>1 2 3 4</b>, Q / E or the mouse wheel (touch: the ⇄ button).</p>
+        <p class="m-desc">${esc(cur.blurb)} You carry all four guns and the set's knife: switch with <b>1 2 3 4</b> and <b>5</b> for the knife, Q / E or the mouse wheel (touch: the ⇄ button, and 🔪 for the knife).</p>
         ${cur.guns.map((g) => { const w = WEAPONS[g]; return `<div class="m-weapon static"><b>${esc(w.name.toUpperCase())}</b>
           ${bar('DAMAGE', (w.damage * w.pellets) / 100)}${bar('FIRE RATE', w.rpm / 950)}${bar('RANGE', w.falloff[1] / 600)}</div>`; }).join('')}
+        ${(() => { const k = WEAPONS[cur.knife]; return `<div class="m-weapon static knife"><b>🔪 ${esc(k.name.toUpperCase())}</b>
+          ${bar('DAMAGE', k.damage / 100)}${bar('SWING SPEED', 0.25 / k.swing)}${bar('REACH', k.reach / 2.6)}${bar('MOBILITY', (k.moveMul - 0.9) / 0.22)}
+          <small class="m-knife-note">${knifeLine(k)}. A hit from behind always kills.</small></div>`; })()}
         <p class="m-note">Sets are fixed: you can't swap single guns in or out. Gun Game gives everyone its own ladder of guns instead.</p>`;
     } else {
       const items = kind === 'camo' ? CAMOS : OUTFITS;

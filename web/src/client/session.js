@@ -12,7 +12,7 @@ import { abilityById } from '../shared/abilities.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { eyeHeightOf } from '../shared/movement.js';
 import { createActor, hitboxesAt, stepCommand, unpackActor } from '../shared/sim.js';
-import { WEAPONS, activeWeapon, currentSpread, spreadDirection, weaponSet } from '../shared/weapons.js';
+import { WEAPONS, activeWeapon, carriedWeapons, currentSpread, spreadDirection } from '../shared/weapons.js';
 import { World } from '../shared/world.js';
 import { Hud } from './hud.js';
 import { Input } from './input.js';
@@ -110,6 +110,7 @@ export class ClientSession {
       onScoreboard: () => {},
       onEmote: () => (this.wheel.open ? this.closeEmoteWheel(null) : this.openEmoteWheel(true, 'emotes')),
       onChat: () => this.openChat(false),
+      onKnife: () => this.toggleKnife(),
     });
     this.touchUI.setEnabled(touchControlsWanted());
     // "Auto" touch mode follows the last thing the player used: a finger or a mouse.
@@ -121,7 +122,7 @@ export class ClientSession {
     window.addEventListener('pointerdown', this._pointerKind, true);
     this.crosshairTarget = false;
 
-    this.actor = createActor(0, 0, 0, 0, weaponSet(settings.weaponSet).guns);
+    this.actor = createActor(0, 0, 0, 0, carriedWeapons(settings.weaponSet));
     this.actor.id = this.myId;
     this.actor.alive = false;
     this.scratch = createActor(0, 0, 0, 0, ['rifle', 'pistol']);
@@ -327,6 +328,26 @@ export class ClientSession {
 
   onEvent(ev) {
     switch (ev.type) {
+      case 'mel': {
+        // Knife swing: third-person slash for others, and the swing / hit sounds where it happened.
+        const w = WEAPONS[ev.w] || WEAPONS.knife;
+        const mine = ev.s === this.myId;
+        const pose = this.renderPoses.get(ev.s);
+        const at = ev.p ? { x: ev.p[0], y: ev.p[1], z: ev.p[2] } : pose ? { x: pose.x, y: pose.y + 1.3, z: pose.z } : null;
+        if (!mine) {
+          this.renderer.characterSlash(ev.s, w.shape === 'hatchet' || w.shape === 'machete');
+          if (pose) this.audio.knifeSwing(w.id, { x: pose.x, y: pose.y + 1.3, z: pose.z });
+        }
+        if ((ev.h === 1 || ev.h === 2) && at) {
+          this.audio.knifeHit(w.id, 'body', mine ? null : at);
+          this.renderer.impact([at.x, at.y, at.z, 0, 1, 0], true, 'body');
+        } else if (ev.h === 3 && at) {
+          const material = ev.m >= 0 ? MATERIAL_IDS[ev.m] : 'ground';
+          this.audio.knifeHit(w.id, material, at);
+          this.renderer.impact([at.x, at.y, at.z, 0, 1, 0], false, material);
+        }
+        return;
+      }
       case 'shot': {
         if (ev.s === this.myId) return;
         this.lastFireSeen.set(ev.s, performance.now());
@@ -360,6 +381,7 @@ export class ClientSession {
       case 'hit':
         this.hud.hitmarker(ev.hs === 1, ev.k === 1);
         if (ev.k) this.audio.kill(); else this.audio.hit(ev.hs === 1);
+        if (ev.bs) this.hud.announce('BACKSTAB!');
         this.vibrate(ev.k ? 45 : 12);
         if (this.match) this.match.hits++;
         return;
@@ -533,7 +555,7 @@ export class ClientSession {
       if (!this.soundsReady) {
         // Render this weapon set's gunshots in the background (one gun per frame) so the first shot doesn't hitch.
         this.soundsReady = true;
-        this.actor.ws.slots.forEach((slot, i) => setTimeout(() => this.running && this.audio.preload([slot.id]), 60 + i * 120));
+        this.actor.ws.slots.filter((slot) => !WEAPONS[slot.id].melee).forEach((slot, i) => setTimeout(() => this.running && this.audio.preload([slot.id]), 60 + i * 120));
       }
     } else if (!this.ended && !this.hud.chatOpen) {
       this.hud.el.pause.querySelector('h2').textContent = 'PAUSED';
@@ -610,7 +632,7 @@ export class ClientSession {
     );
     this.updateLook(dt);
     this.updateSway(dt);
-    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed(), ability: abilityById(this.actor.ability), cooldown: Math.max(0, (this.actor.abilityReady || 0) - this.actor.clock), joinable: !!this.joinable });
+    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed(), ability: abilityById(this.actor.ability), cooldown: Math.max(0, (this.actor.abilityReady || 0) - this.actor.clock), joinable: !!this.joinable, knife: !!activeWeapon(this.actor.ws).melee });
     // T: chat to everyone · Y: team chat · B: emote wheel.
     const wantChat = this.input.consume('chat'), wantTeam = this.input.consume('teamChat');
     const wantWheel = this.input.consume('emote'), wantQuick = this.input.consume('quick');
@@ -981,6 +1003,14 @@ export class ClientSession {
   }
 
   /** Auto-fire setting: 'off', 'hip' (never while aiming down sights) or 'always'. */
+  /** Touch 🔪 button: knife out, or back to the last gun. */
+  toggleKnife() {
+    const ws = this.actor.ws;
+    const knife = ws.slots.findIndex((s) => WEAPONS[s.id].melee);
+    if (knife < 0) return;
+    this.input.latched.slot = ws.active === knife ? (this.lastGunSlot ?? 0) : knife;
+  }
+
   autoFireAllowed() {
     const mode = settings.autoFire;
     if (mode === 'always') return true;
@@ -1075,13 +1105,27 @@ export class ClientSession {
       },
       onReloadDone: () => { this.audio.reloadDone(); this.hud.hideReload(); },
       onDryFire: () => this.audio.dryFire(),
-      onSwitch: () => { this.hud.hideReload(); this.audio.cancelReload(); this.renderer.setViewWeapon(activeWeapon(this.actor.ws).id); },
+      onSwitch: (actor, slot) => {
+        this.hud.hideReload();
+        this.audio.cancelReload();
+        const w = activeWeapon(this.actor.ws);
+        if (!w.melee) this.lastGunSlot = slot;
+        else this.audio.knifeDraw(w.id);
+        this.renderer.setViewWeapon(w.id);
+      },
     };
     return this._hooks;
   }
 
   onLocalShot(actor, shot) {
     const w = shot.weapon;
+    if (w.melee) {
+      // Knife: swing animation and whoosh now; hits are confirmed by the host ('mel' + 'hit').
+      this.renderer.viewModelFire();
+      this.audio.knifeSwing(w.id, null);
+      this.viewPitch = clamp(this.viewPitch - 0.004, -1.5, 1.5);
+      return;
+    }
     // Recoil: a learnable per-weapon pattern (the first shots stay close, then the climb grows and the gun walks
     // side to side), with a little randomness. Aiming down sights and crouching tame it.
     const now = performance.now();
