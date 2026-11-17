@@ -429,6 +429,7 @@ if (failures) process.exitCode = 1;
   const { GameHost: Host } = await import('../src/shared/host.js');
   const { BTN } = await import('../src/shared/constants.js');
   const { WEAPONS, WEAPON_SETS, KNIFE_IDS } = await import('../src/shared/weapons.js');
+  const activeId = (e) => e.ws.slots[e.ws.active].id;
   const knives = WEAPON_SETS.map((s) => s.knife);
   if (new Set(knives).size !== WEAPON_SETS.length || !knives.every((k) => WEAPONS[k] && WEAPONS[k].melee)) failures.push('every set needs its own knife');
   const bySpeed = KNIFE_IDS.map((id) => WEAPONS[id]).sort((p, q) => p.swing - q.swing);
@@ -510,8 +511,22 @@ if (failures) process.exitCode = 1;
   const orig = botHost.game.event.bind(botHost.game);
   botHost.game.event = (ev, ex) => { if (ev.type === 'mel') botSwings++; if (ev.type === 'kill' && WEAPONS[ev.w] && WEAPONS[ev.w].melee) botKnifeKills++; return orig(ev, ex); };
   for (let t = 0; t < 240; t += 0.1) botHost.update(0.1);
-  if (!botSwings) failures.push('bots never used their knives in 4 minutes');
+  // Deterministic: a bot with every gun empty, next to an enemy, pulls its knife and swings.
+  const duo = new Host({ mode: 'ffa', map: 'outpost', bots: 2, difficulty: 'hard' }, { send: () => {} });
+  for (let t = 0; t < 6; t += 0.1) duo.update(0.1);
+  const [b1, b2] = [...duo.game.entities.values()].filter((e) => e.isBot);
+  const open = spot;
+  let duoSwings = 0;
+  const origDuo = duo.game.event.bind(duo.game);
+  duo.game.event = (ev, ex) => { if (ev.type === 'mel' && ev.s === b1.id) duoSwings++; return origDuo(ev, ex); };
+  for (let t = 0; t < 4 && !duoSwings; t += 0.1) {
+    b1.motor.x = open.x; b1.motor.z = open.z; b1.motor.y = 0; b2.motor.x = open.x; b2.motor.z = open.z - 1.5; b2.motor.y = 0;
+    b2.protectUntil = 1e9; b1.alive = b2.alive = true; b2.hp = b2.maxHp;
+    for (const sl of b1.ws.slots) if (!WEAPONS[sl.id].melee) { sl.mag = 0; sl.reserve = 0; }
+    duo.update(0.1);
+  }
+  if (!duoSwings) failures.push(`a bot out of ammo next to an enemy never swung its knife (holding ${activeId(b1)})`);
   console.log(`knives: ${KNIFE_IDS.map((id) => `${WEAPONS[id].name} ${WEAPONS[id].swing}s/${WEAPONS[id].damage}`).join(', ')}`);
-  console.log(`knives: hit ${hit1}, swings/s combat ${aSwings} karambit ${kSwings}, backstab kill ${backstabKill}; bots: ${botSwings} swings, ${botKnifeKills} knife kills`);
+  console.log(`knives: hit ${hit1}, swings/s combat ${aSwings} karambit ${kSwings}, backstab kill ${backstabKill}; bots: ${botSwings} swings, ${botKnifeKills} knife kills in 4 min; out-of-ammo bot swung ${duoSwings > 0}`);
   if (failures.length) { console.log('KNIFE FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('knife checks passed');
 }
