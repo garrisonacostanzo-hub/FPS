@@ -11,6 +11,7 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Squads:** invite friends to your squad and play Ranked or any team mode together on the same team.
 * **Showdown:** 1v1 a friend, either rated on its own ladder or just for fun.
 * **Weapon sets:** pick one of six fixed sets of four guns, and carry all four.
+* **Special abilities:** pick one of six (Dash, Stim, Frag Grenade, Smoke Grenade, Recon Pulse, Cloak) and use it with **F**.
 * **Ammo drops:** whoever dies drops all the ammo they had; walk over it to refill your guns.
 * **Emotes, text chat and voice chat:** an emote wheel on **B**, all and team chat, and push-to-talk voice in online matches.
 * **Adaptive bots:** they get tougher the better you are and the more you play.
@@ -49,6 +50,21 @@ Some rules:
 
   To use online play on a managed network, ask its IT staff to allow `0.peerjs.com` and WebRTC.
 * Advanced: to use your own PeerJS signaling server, open `VANGUARD.html?signal=your-host:9000`. Everyone in a match must use the same server.
+
+## Special abilities
+
+Pick one ability (PLAY / ONLINE tabs, **ARMORY → ABILITIES**, or the pause menu during a match, which applies when you respawn). Press **F** (touch: **⚡**) to use it. It then recharges, and it's always ready when you spawn. The icon next to your ammo shows the countdown.
+
+| Ability | Cooldown | What it does |
+|---|---|---|
+| 💨 **Dash** | 7 s | Bursts about 4-5 m in the direction you're moving (forward if standing still), even in the air. |
+| 💉 **Stim** | 18 s | Heals 50 health at once and starts regenerating straight away. |
+| 💣 **Frag Grenade** | 14 s | Thrown where you look. It bounces and explodes after 1.5 s: up to 110 damage within 6 m, less further out, blocked by walls. Half damage to yourself, none to teammates. |
+| ☁️ **Smoke Grenade** | 20 s | A thick 5 m smoke cloud for 10 seconds. You can't see through it, and neither can bots. |
+| 📡 **Recon Pulse** | 22 s | Reveals every enemy within 40 m to you and your team for 4 seconds: a red marker over them, visible through walls. The revealed players are warned. |
+| 👻 **Cloak** | 24 s | Nearly invisible for 5 seconds. Enemies see only a faint shimmer, and bots only spot you within 6 m. Your teammates still see you. Shooting ends it. |
+
+Abilities run through the same input commands as shooting, so they're predicted on your screen and checked by the host, and Dash stays smooth online. Bots get a random ability and use it when it suits the fight: Stim when hurt, Frag at mid range, Smoke when taking cover, Pulse when they've lost you, Cloak when flanking.
 
 ## Emotes, chat and voice chat
 
@@ -141,6 +157,7 @@ The same file has touch controls. They turn on automatically when you touch the 
 | Crouch | **CROUCH** (tap to toggle) |
 | Jump / reload | **JUMP** / **RELOAD** |
 | Switch weapon | Tap the weapon and ammo panel (⇄) to go to the next gun in your set |
+| Special ability | **⚡** button next to AIM (shows the seconds left while it recharges) |
 | Emote wheel / chat | **😀** / **💬** at the top right |
 | Push to talk (online) | Hold **🎙** (left side, shown when voice chat is on) |
 | Scoreboard / pause | **☰** / **II** at the top right |
@@ -206,6 +223,7 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 | Switch weapon | `1` `2` `3` `4`, `Q` `E`, mouse wheel |
 | Scoreboard | `Tab` |
 | Chat to everyone / team chat | `T` (or `Enter`) / `Y` (`Tab` while typing switches between them) |
+| Special ability | `F` |
 | Emote wheel | Hold `B`, move the mouse toward an emote, let go (or click) |
 | Push to talk (online) | Hold `V` |
 | Pause / menu | `Esc` (has the **TOGGLE SCOPE** switch at the top) |
@@ -493,6 +511,7 @@ web/
    │  ├─ ballistics.js      # bullet flight (velocity, drag, gravity), materials and penetration
    │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers, Showdown titles
    │  ├─ emotes.js          # the eight emotes on the wheel
+   │  ├─ abilities.js       # the six special abilities and their tuning
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
    │  └─ host.js            # fixed-tick match host, client bindings, network messages
    └─ client/               # browser only

@@ -9,6 +9,7 @@ import { dropAt, flightTime } from './ballistics.js';
 import { resolveDifficulty } from './difficulty.js';
 import { DEG, angleDiff, clamp, dist2, dist3, distToSegment, moveTowardsAngle, anglesFromDir } from './math.js';
 import { eyeHeightOf } from './movement.js';
+import { CLOAK } from './abilities.js';
 import { WEAPONS, activeWeapon, canReload } from './weapons.js';
 
 const S = {
@@ -124,6 +125,8 @@ export class BotBrain {
     if (this.aimWanted && this.targetVisible) cmd.b |= BTN.AIM;
     if (this.reloadWanted) { cmd.r = true; this.reloadWanted = false; }
 
+    this.useAbility(cmd);
+
     // Weapon choice: leave an empty gun, and use the gun from the weapon set that suits the target's distance.
     const ws = e.ws;
     const slot = ws.slots[ws.active];
@@ -141,6 +144,28 @@ export class BotBrain {
       }
     }
     return cmd;
+  }
+
+  /** Special abilities: a quick tap of the ability button when the situation suits the bot's ability. */
+  useAbility(cmd) {
+    const e = this.e, game = this.game;
+    if (e.clock < (e.abilityReady || 0) || this.now < (this.nextAbilityThink || 0)) return;
+    this.nextAbilityThink = this.now + 0.4 + this.rng() * 0.4;
+    const hp = e.hp / e.maxHp;
+    const visible = this.targetVisible && this.target && this.target.alive;
+    const dist = visible ? Math.hypot(this.target.motor.x - e.motor.x, this.target.motor.z - e.motor.z) : Infinity;
+    const hurt = this.now - this.lastDamaged < 0.6;
+    let use = false;
+    switch (e.ability) {
+      case 'dash': use = (hurt && hp < 0.7) || (this.state === S.FLANK && this.rng() < 0.15); break;
+      case 'stim': use = hp < 0.45; break;
+      case 'frag': use = visible && dist > 7 && dist < 26 && this.rng() < 0.35; break;
+      case 'smoke': use = (this.state === S.COVER && visible) || (hurt && hp < 0.4); break;
+      case 'pulse': use = !visible && this.now - (this.acquired || 0) > 4 && this.rng() < 0.3; break;
+      case 'cloak': use = (this.state === S.FLANK || (!visible && this.rng() < 0.1)) && !game.isCloaked(e); break;
+      default: break;
+    }
+    if (use) cmd.b |= BTN.ABILITY;
   }
 
   // ============================================================================================
@@ -174,6 +199,9 @@ export class BotBrain {
 
       if (!game.world.lineOfSight(m.x, eyeY, m.z, om.x, oEye, om.z) &&
           !game.world.lineOfSight(m.x, eyeY, m.z, om.x, om.y + 1.0, om.z)) continue;
+      // Smoke blocks sight; a cloaked player is only spotted up close.
+      if (game.smokes.length && game.smokeBlocks(m.x, eyeY, m.z, om.x, oEye, om.z)) continue;
+      if (game.isCloaked(o) && dist > CLOAK.spotDistance) continue;
 
       const distFactor = 3.5 + (0.55 - 3.5) * Math.min(1, dist / d.detect);
       const centre = angle < halfFov * 0.35 ? 1.35 : angle > halfFov ? 0.45 : 1;

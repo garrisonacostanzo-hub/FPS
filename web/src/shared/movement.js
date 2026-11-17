@@ -96,6 +96,9 @@ export function simulateMotor(state, cmd, world, aimSpeedMul = 0.65) {
     if (dl <= rate) { state.vx = tx; state.vz = tz; } else { state.vx += (dvx / dl) * rate; state.vz += (dvz / dl) * rate; }
   }
 
+  // --- dash ability: a short burst that overrides the horizontal velocity -----------------------
+  if (cmd.dash) { state.vx = cmd.dash.dashX; state.vz = cmd.dash.dashZ; }
+
   // --- jump (coyote time + buffer) ----------------------------------------------------------
   state.jumpBuffer = (buttons & BTN.JUMP) ? MOVE.jumpBuffer : Math.max(0, state.jumpBuffer - dt);
   state.coyote = state.grounded ? MOVE.coyoteTime : Math.max(0, state.coyote - dt);

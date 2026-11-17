@@ -24,6 +24,7 @@ export const DEFAULTS = {
   quality: coarsePointer() ? 'medium' : 'high', // phones/tablets default to a lighter renderer
   primary: 'rifle',      // (older saves) replaced by weaponSet
   weaponSet: 'assault',  // fixed set of four guns, see WEAPON_SETS
+  ability: 'dash',       // special ability (F / ⚡), see ABILITIES
   toggleCrouch: false,
   toggleAim: true,       // right mouse: click to scope in, click again to scope out (false = hold)
   // Voice chat in online matches.

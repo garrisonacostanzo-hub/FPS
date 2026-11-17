@@ -22,9 +22,11 @@ export class GameHost {
 
   get playerCount() { return this.clients.size; }
 
-  /** @param {string} setId the player's weapon set */
-  join(clientId, name, setId, cosmetics) {
-    const entity = this.game.addHuman(clientId, sanitizeName(name), setId, cosmetics);
+  /** @param {string | {set: string, ability: string}} loadout the player's weapon set (and special ability) */
+  join(clientId, name, loadout, cosmetics) {
+    const setId = loadout && typeof loadout === 'object' ? loadout.set : loadout;
+    const ability = loadout && typeof loadout === 'object' ? loadout.ability : undefined;
+    const entity = this.game.addHuman(clientId, sanitizeName(name), setId, cosmetics, ability);
     this.clients.set(clientId, { entityId: entity.id, name: entity.name });
     this.send(clientId, {
       type: 'welcome',
@@ -61,7 +63,8 @@ export class GameHost {
         this.game.queueCommands(entity, msg.c);
         break;
       case 'loadout':
-        this.game.setPreferredSet(entity, String(msg.set || ''));
+        if (msg.set) this.game.setPreferredSet(entity, String(msg.set));
+        if (msg.ability) this.game.setPreferredAbility(entity, String(msg.ability));
         break;
       case 'ping':
         this.send(clientId, { type: 'pong', t: msg.t, st: this.game.time });

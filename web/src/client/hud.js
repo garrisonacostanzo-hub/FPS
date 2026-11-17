@@ -2,6 +2,7 @@
 // minimap, scoreboard, death / end screens, pause & settings menu and chat.
 import { TEAM, TEAM_NAMES } from '../shared/constants.js';
 import { MODE_LIST } from '../shared/modes.js';
+import { ABILITIES } from '../shared/abilities.js';
 import { EMOTES } from '../shared/emotes.js';
 import { WEAPONS, WEAPON_SETS } from '../shared/weapons.js';
 import { saveSettings, settings } from './settings.js';
@@ -161,7 +162,7 @@ export class Hud {
   // Feed & announcements
   // ------------------------------------------------------------------------------------------------
   killfeed(killer, victim, weaponId, headshot, killerColor, victimColor, highlight) {
-    const w = WEAPONS[weaponId];
+    const w = WEAPONS[weaponId] || (weaponId === 'frag' ? { name: 'Frag Grenade' } : null);
     const row = document.createElement('div');
     row.className = 'feed-row' + (highlight ? ' me' : '');
     const kname = killer ? `<b style="color:${killerColor}">${esc(killer)}</b> ` : '';
@@ -258,6 +259,35 @@ export class Hud {
       ? `<b>IN VOICE</b>${list.map((m) => `<div class="vm-row"><span>${esc(m.name)}${m.connected ? '' : ' <small>connecting…</small>'}</span><button data-vmute="${m.id}" class="${m.muted ? 'on' : ''}">${m.muted ? 'MUTED' : 'MUTE'}</button></div>`).join('')}`
       : '<p class="sub">Nobody else is in voice yet.</p>';
     box.querySelectorAll('[data-vmute]').forEach((b) => b.addEventListener('click', () => this.callbacks.onVoiceMute && this.callbacks.onVoiceMute(Number(b.dataset.vmute))));
+  }
+
+  // ------------------------------------------------------------------------------------------------
+  // Special ability
+  // ------------------------------------------------------------------------------------------------
+  /** Ability icon with a cooldown sweep and seconds left; cloak shows a blue tint and its time. */
+  setAbility(ab, cooldownLeft, alive, cloakLeft) {
+    const el = this.root.querySelector('#ability');
+    const ready = cooldownLeft <= 0.05;
+    const frac = ready ? 1 : 1 - cooldownLeft / ab.cooldown;
+    const key = `${ab.id}|${ready}|${Math.ceil(cooldownLeft)}|${Math.round(frac * 40)}|${alive}|${Math.ceil(cloakLeft)}`;
+    if (key === this._abilityKey) return;
+    this._abilityKey = key;
+    el.querySelector('.ab-icon i').textContent = ab.icon;
+    el.querySelector('.ab-icon em').textContent = ready ? '' : String(Math.ceil(cooldownLeft));
+    el.querySelector('.ab-icon').style.setProperty('--cd', (frac * 360).toFixed(0) + 'deg');
+    el.querySelector('.ab-text b').textContent = cloakLeft > 0 ? `CLOAKED ${Math.ceil(cloakLeft)}s` : ab.name.toUpperCase();
+    el.classList.toggle('ready', ready && alive);
+    el.style.display = alive ? '' : 'none';
+    this.root.querySelector('#cloak-fx').classList.toggle('on', cloakLeft > 0);
+  }
+
+  abilityNotice(text, color) {
+    const el = this.root.querySelector('#ability-note');
+    el.textContent = text;
+    el.style.color = color || '#fff';
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
   }
 
   /** "+90 AMMO" after walking over a dropped ammo pack. */
@@ -524,14 +554,16 @@ export class Hud {
           <button data-act="togglescope" class="switch ${toggleOn ? 'on' : ''}" aria-pressed="${toggleOn}">${toggleOn ? 'ON' : 'OFF'}</button>
         </div>
         <label class="set"><span>Weapon set (next respawn)</span><select data-k="weaponSet" data-type="select">${setOptions}</select></label>
+        <label class="set"><span>Special ability (next respawn)</span><select data-k="ability" data-type="select">${ABILITIES.map((a) => `<option value="${a.id}" ${settings.ability === a.id ? 'selected' : ''}>${a.icon} ${esc(a.name)} (${a.cooldown} s)</option>`).join('')}</select></label>
         ${this.online ? '<div class="voice-members"></div>' : ''}
-        <p class="sub keys">T chat · Y team chat · B emote wheel${this.online ? ' · V push to talk' : ''} · 1-4 weapons</p>
+        <p class="sub keys">F ability · T chat · Y team chat · B emote wheel${this.online ? ' · V push to talk' : ''} · 1-4 weapons</p>
         ${renderSettingsSections({ inGame: true, open: [touchSettingsRelevant() ? 'touch' : 'mouse'] })}
       </div>`;
     bindSettingsControls(el, (k, value) => {
       if (k.startsWith('crosshair')) this.applyCrosshairStyle();
       if (k === 'showMinimap' || k === 'showFps') this.applySettings();
-      if (k === 'weaponSet' && this.callbacks.onLoadout) this.callbacks.onLoadout(value);
+      if (k === 'weaponSet' && this.callbacks.onLoadout) this.callbacks.onLoadout({ set: value });
+      if (k === 'ability' && this.callbacks.onLoadout) this.callbacks.onLoadout({ ability: value });
       if (k === 'toggleAim' || k === 'aimButton') this.syncScopeSwitch();
     });
     // One switch for both mouse (right-click) and touch (AIM button).
@@ -768,6 +800,9 @@ const TEMPLATE = `
   <div id="protect">SPAWN PROTECTION</div>
   <div id="vitals"><div id="team-badge" class="label"></div><div class="label">HEALTH</div><div id="hp-value">100</div><div class="bar"><div id="hp-fill"></div></div></div>
   <div id="ammo-gain"></div>
+  <div id="ability"><div class="ab-icon"><i></i><em></em></div><div class="ab-text"><b></b><small>F</small></div></div>
+  <div id="ability-note"></div>
+  <div id="cloak-fx"></div>
   <div id="emote-wheel" aria-hidden="true">
     ${EMOTES.map((em, i) => { const a = (i / EMOTES.length) * Math.PI * 2; return `<button class="ew-item" data-emote="${em.id}" style="left:calc(50% + ${(Math.sin(a) * 140).toFixed(1)}px);top:calc(50% - ${(Math.cos(a) * 140).toFixed(1)}px)"><i>${em.icon}</i><b>${em.label}</b></button>`; }).join('')}
     <div class="ew-center"><b>EMOTES</b><small>Move the mouse to pick, let go of B</small></div>

@@ -104,6 +104,23 @@ function buildAmmoPack() {
 
 const EMOTE_TIME = 2.4;
 
+function revealSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ff3b30';
+  g.strokeStyle = '#fff';
+  g.lineWidth = 4;
+  g.beginPath(); g.moveTo(32, 6); g.lineTo(56, 32); g.lineTo(32, 58); g.lineTo(8, 32); g.closePath();
+  g.fill(); g.stroke();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, fog: false }));
+  sprite.scale.set(0.42, 0.42, 1);
+  sprite.renderOrder = 12;
+  return sprite;
+}
+
 /** Emote bubble: the emote's icon in a rounded tag with its label. */
 function emoteSprite(emote) {
   const c = document.createElement('canvas');
@@ -238,7 +255,8 @@ class CharacterModel {
     this.deathBlend += ((p.alive ? 0 : 1) - this.deathBlend) * Math.min(1, dt * 6);
     this.body.rotation.x = -this.deathBlend * 1.45;
     if (this.deathBlend > 0.01) this.body.position.y = this.deathBlend * 0.15;
-    if (this.label) this.label.visible = p.alive;
+    if (this.label) this.label.visible = p.alive && !this.cloaked;
+    if (this.cloaked) this.marker.visible = false;
     this.animateEmote(p);
     return speed;
   }
@@ -261,6 +279,35 @@ class CharacterModel {
     if (muzzle) muzzle.getWorldPosition(out);
     else out.set(this.root.position.x, this.root.position.y + 1.4, this.root.position.z);
     return out;
+  }
+
+  /** Cloak: enemies see only a faint shimmer; teammates still see you. */
+  setCloak(on, ally) {
+    const hide = on && !ally;
+    if (this.cloaked === hide) return;
+    this.cloaked = hide;
+    this.body.visible = !hide;
+    if (!this.ghost) {
+      this.ghost = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 1.05, 4, 10), new THREE.MeshBasicMaterial({
+        color: 0x9fd8ff, transparent: true, opacity: 0.09, depthWrite: false, blending: THREE.AdditiveBlending,
+      }));
+      this.ghost.position.y = 0.9;
+      this.root.add(this.ghost);
+    }
+    this.ghost.visible = hide;
+  }
+
+  /** Recon Pulse: a red diamond over a revealed enemy, visible through walls. */
+  setRevealed(on) {
+    if (on && !this.revealMark) {
+      this.revealMark = revealSprite();
+      this.revealMark.position.set(0, 2.35, 0);
+      this.root.add(this.revealMark);
+    }
+    if (this.revealMark) {
+      this.revealMark.visible = on;
+      if (on) this.revealMark.material.opacity = 0.65 + 0.35 * Math.sin(performance.now() / 120);
+    }
   }
 
   /** Starts an emote: an icon bubble over the head and a short body animation (see animateEmote). */
@@ -503,6 +550,101 @@ export class GameRenderer {
   }
 
   // ------------------------------------------------------------------------------------------------
+  // Abilities: grenades in flight, smoke clouds, explosions, the Recon Pulse ring
+  // ------------------------------------------------------------------------------------------------
+  syncGrenades(list, dt) {
+    if (!this.grenadeMeshes) {
+      this.grenadeMeshes = new Map();
+      this.grenadeGeo = [new THREE.SphereGeometry(0.075, 10, 8), new THREE.CylinderGeometry(0.05, 0.05, 0.16, 10)];
+      this.grenadeMat = [mat('#3d4a2a', { rough: 0.6, metal: 0.4 }), mat('#9aa0a6', { rough: 0.5, metal: 0.5 })];
+    }
+    const seen = new Set();
+    for (const [id, x, y, z, kind] of list) {
+      seen.add(id);
+      let m = this.grenadeMeshes.get(id);
+      if (!m) {
+        m = new THREE.Mesh(this.grenadeGeo[kind], this.grenadeMat[kind]);
+        m.position.set(x, y, z);
+        m.castShadow = true;
+        this.scene.add(m);
+        this.grenadeMeshes.set(id, m);
+      }
+      m.position.lerp(new THREE.Vector3(x, y, z), Math.min(1, dt * 18));
+      m.rotation.x += dt * 9; m.rotation.z += dt * 6;
+    }
+    for (const [id, m] of this.grenadeMeshes) if (!seen.has(id)) { this.scene.remove(m); this.grenadeMeshes.delete(id); }
+  }
+
+  /** Smoke clouds: overlapping soft sprites, thick enough to hide players behind and inside them. */
+  syncSmokes(list, time) {
+    if (!this.smokeClouds) this.smokeClouds = new Map();
+    const seen = new Set();
+    for (const [id, x, y, z, r, left] of list) {
+      seen.add(id);
+      let cloud = this.smokeClouds.get(id);
+      if (!cloud) {
+        cloud = { group: new THREE.Group(), born: time, parts: [] };
+        let seed = id * 7919;
+        const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+        for (let i = 0; i < 22; i++) {
+          const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * r * 0.75;
+          const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.fx.smokeTex, color: 0xb9bcc0, transparent: true, depthWrite: false, opacity: 0 }));
+          const size = r * (0.9 + rnd() * 0.6);
+          sprite.position.set(Math.cos(a) * d, 0.6 + rnd() * r * 0.55, Math.sin(a) * d);
+          sprite.scale.set(size, size, 1);
+          sprite.material.rotation = rnd() * 6;
+          sprite.userData.spin = (rnd() - 0.5) * 0.3;
+          cloud.group.add(sprite);
+          cloud.parts.push(sprite);
+        }
+        cloud.group.position.set(x, y, z);
+        this.scene.add(cloud.group);
+        this.smokeClouds.set(id, cloud);
+      }
+      const grow = Math.min(1, (time - cloud.born) / 0.8);
+      const fade = Math.min(1, left / 1.5);
+      for (const sp of cloud.parts) {
+        sp.material.opacity = 0.9 * grow * fade;
+        sp.material.rotation += sp.userData.spin * 0.016;
+      }
+      cloud.group.scale.setScalar(0.5 + 0.5 * grow);
+    }
+    for (const [id, cloud] of this.smokeClouds) {
+      if (seen.has(id)) continue;
+      this.scene.remove(cloud.group);
+      for (const sp of cloud.parts) sp.material.dispose();
+      this.smokeClouds.delete(id);
+    }
+  }
+
+  explosion(x, y, z) { this.fx.explosion(x, y, z); }
+
+  /** Recon Pulse: a ring sweeping out over the ground from where it was used. */
+  pulseRing(x, y, z) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 64), new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.4, 1.6, 2.2), transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, y + 0.1, z);
+    this.scene.add(ring);
+    const start = performance.now();
+    const grow = () => {
+      const k = (performance.now() - start) / 900;
+      if (k >= 1 || !this.scene) { this.scene.remove(ring); ring.geometry.dispose(); ring.material.dispose(); return; }
+      ring.scale.setScalar(1 + k * 40);
+      ring.material.opacity = 0.8 * (1 - k);
+      requestAnimationFrame(grow);
+    };
+    requestAnimationFrame(grow);
+  }
+
+  /** Small puff where someone dashed / healed (others' abilities). */
+  abilityPuff(kind, x, y, z) {
+    const color = kind === 'stim' ? 0x7dffa0 : kind === 'cloak' ? 0x9fd8ff : 0xdfe6ee;
+    for (let i = 0; i < 4; i++) this.fx.puff(x + (Math.random() - 0.5) * 0.6, y + Math.random() * 0.6, z + (Math.random() - 0.5) * 0.6, color, 0.5, 0.45, 500);
+  }
+
+  // ------------------------------------------------------------------------------------------------
   // Dropped ammo packs
   // ------------------------------------------------------------------------------------------------
   /** Shows exactly the packs in the latest snapshot ([id, x, y, z] rows), spinning and bobbing. */
@@ -544,6 +686,8 @@ export class GameRenderer {
       c.labelKey = null;
     }
     c.setMarker(markerVisible && pose.alive);
+    c.setCloak(!!pose.cloak && pose.alive, !!info.ally);
+    c.setRevealed(!!pose.revealed && pose.alive);
     const key = (labelText || '') + labelColor;
     if (c.labelKey !== key) { c.setLabel(labelText, labelColor); c.labelKey = key; }
     c.setWeapon(pose.weapon);

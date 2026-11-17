@@ -38,6 +38,7 @@ const BUTTONS = [
   ['emote', '😀', 'top emote'],
   ['chat', '💬', 'top chatbtn'],
   ['talk', '🎙', 'talk'],
+  ['ability', '⚡', 'ability'],
   ['pause', 'II', 'top pause'],
 ];
 
@@ -126,6 +127,12 @@ export class TouchControls {
     this.btn.crouch.classList.toggle('on', t.crouch);
     this.btn.score.classList.toggle('on', t.scoreboard);
     this.btn.fire.classList.toggle('auto', !!state.autoFiring);
+    if (state.ability) {
+      const secs = Math.ceil(state.cooldown || 0);
+      const label = `${state.ability.icon}${secs > 0 ? `<i>${secs}</i>` : ''}`;
+      if (label !== this._abilityLabel) { this._abilityLabel = label; this.btn.ability.innerHTML = label; }
+      this.btn.ability.classList.toggle('cooling', secs > 0);
+    }
   }
 
   // ------------------------------------------------------------------------------------------------
@@ -152,6 +159,7 @@ export class TouchControls {
       case 'emote': if (this.callbacks.onEmote) this.callbacks.onEmote(); break;
       case 'chat': if (this.callbacks.onChat) this.callbacks.onChat(); break;
       case 'talk': t.talk = true; role = 'talk'; break; // push-to-talk while held
+      case 'ability': t.ability = true; role = 'ability'; break; // special ability (released on lift)
       default:
         if (e.clientX < window.innerWidth * 0.42 && this.stickId === null) {
           role = 'stick';
@@ -213,6 +221,7 @@ export class TouchControls {
     if (p.role === 'fire' || p.role === 'fire2') this.input.touch.fire = Math.max(0, this.input.touch.fire - 1);
     if (p.role === 'aim') this.input.touch.aimHold = Math.max(0, this.input.touch.aimHold - 1);
     if (p.role === 'talk') this.input.touch.talk = false;
+    if (p.role === 'ability') this.input.touch.ability = false;
     if (p.role === 'stick') {
       this.stickId = null;
       this.setStick(0, 0, false);

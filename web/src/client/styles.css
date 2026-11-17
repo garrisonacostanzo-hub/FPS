@@ -381,6 +381,10 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
 .tbtn.chatbtn { right: calc(160px + var(--sr)); font-size: 18px; }
 .tbtn.talk { display: none; width: calc(var(--u) * 54px); height: calc(var(--u) * 54px); left: calc(var(--u) * 24px + var(--sl)); bottom: calc(var(--u) * 250px + var(--sb)); font-size: calc(var(--u) * 20px); }
 #touch.voice .tbtn.talk { display: flex; }
+.tbtn.ability { width: calc(var(--u) * 58px); height: calc(var(--u) * 58px); right: calc(var(--u) * 212px + var(--sr)); bottom: calc(var(--u) * 40px + var(--sb)); font-size: calc(var(--u) * 22px);
+  background: rgba(120, 80, 255, 0.28); border-color: rgba(170, 140, 255, 0.85); }
+.tbtn.ability.cooling { opacity: calc(var(--o) * 0.5); }
+.tbtn.ability i { position: absolute; bottom: -2px; font-style: normal; font-size: calc(var(--u) * 11px); font-weight: 800; }
 .tbtn.talk.down { background: rgba(76, 217, 100, 0.45); border-color: #4cd964; }
 .stick {
   position: absolute; width: calc(var(--u) * 116px); height: calc(var(--u) * 116px);
@@ -668,3 +672,25 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
 #pause .vm-row button.on { background: #ff4a3d; border-color: #ff4a3d; color: #fff; }
 #pause .keys { font-size: 12px; letter-spacing: 0.5px; }
 #hud.touch #pause .keys { display: none; }
+/* ---------------------------------------------------------------- special ability */
+#ability { position: absolute; right: 300px; bottom: 22px; display: flex; align-items: center; gap: 10px; background: var(--panel); border-radius: 12px; padding: 8px 14px 8px 8px; }
+#ability .ab-icon { position: relative; width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: conic-gradient(rgba(150,120,255,0.85) var(--cd, 360deg), rgba(255,255,255,0.08) 0); }
+#ability .ab-icon::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: rgba(10,12,18,0.92); }
+#ability .ab-icon i { position: relative; z-index: 1; font-style: normal; font-size: 24px; opacity: 0.45; }
+#ability .ab-icon em { position: absolute; z-index: 2; font-style: normal; font-weight: 800; font-size: 20px; color: #fff; text-shadow: 0 1px 3px #000; }
+#ability.ready .ab-icon { background: rgba(150,120,255,0.95); box-shadow: 0 0 14px rgba(150,120,255,0.75); }
+#ability.ready .ab-icon i { opacity: 1; }
+#ability .ab-text b { display: block; font-size: 14px; letter-spacing: 1.5px; }
+#ability .ab-text small { display: inline-block; margin-top: 2px; font-size: 11px; font-weight: 800; padding: 0 6px; border-radius: 4px; background: rgba(255,255,255,0.15); }
+#hud.touch #ability { display: none !important; }
+#ability-note { position: absolute; left: 0; right: 0; top: 24%; text-align: center; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-shadow: 0 2px 8px #000; opacity: 0; pointer-events: none; }
+#ability-note.show { animation: ability-note 2.4s ease-out forwards; }
+@keyframes ability-note { 0% { opacity: 0; transform: scale(0.95); } 10% { opacity: 1; transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
+#cloak-fx { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.25s; box-shadow: inset 0 0 160px rgba(120,190,255,0.55); background: rgba(120,170,255,0.06); }
+#cloak-fx.on { opacity: 1; }
+.m-set.ability { align-items: flex-start; }
+.m-set .ab-big { font-size: 34px; line-height: 1; }
+.m-set .ab-cd { font-style: normal; font-size: 11px; letter-spacing: 1.5px; font-weight: 700; color: var(--m-accent); }
+.m-set.on .ab-cd { color: #0b0c0e; }
+.ab-hero { font-size: 64px; line-height: 1; }

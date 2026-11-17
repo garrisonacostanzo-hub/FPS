@@ -111,6 +111,35 @@ export class AudioEngine {
   }
 
   /** A bullet passing close by: a sharp crack for supersonic rounds, a whistling whiz for slow ones. */
+  /** Frag grenade explosion: a low thump with a noisy crack, positional. */
+  boom(position) {
+    if (!this.ensure()) return;
+    const b = this.buffer('boom', (ctx) => synth(ctx, 1.4, (t, rnd, st) => {
+      st.lp += (rnd() * 2 - 1 - st.lp) * 0.08;
+      const thump = Math.sin(2 * Math.PI * (55 - 25 * t) * t) * Math.exp(-t * 3.2);
+      const crack = st.lp * 3 * Math.exp(-t * 4.5);
+      return (thump * 0.9 + crack) * Math.min(1, t / 0.002);
+    }, 1.0));
+    this.play(b, { volume: 1, position, maxDistance: 160 });
+  }
+
+  /** Short cue for each special ability (yours, or someone else's nearby). */
+  ability(kind, position) {
+    if (!this.ensure()) return;
+    const cues = {
+      dash: [(t, rnd, st) => { st.lp += (rnd() * 2 - 1 - st.lp) * 0.25; return st.lp * Math.sin(Math.PI * Math.min(1, t / 0.25)) * 1.2; }, 0.25],
+      stim: [(t) => Math.sin(2 * Math.PI * (600 + 900 * t) * t) * Math.exp(-t * 5) * 0.5, 0.45],
+      frag: [(t, rnd) => (rnd() * 2 - 1) * Math.exp(-t * 40) * 0.6 + Math.sin(2 * Math.PI * 900 * t) * Math.exp(-t * 30) * 0.3, 0.12],
+      smoke: [(t, rnd, st) => { st.lp += (rnd() * 2 - 1 - st.lp) * 0.5; return st.lp * Math.exp(-t * 0.9) * 0.5; }, 1.6],
+      pulse: [(t) => Math.sin(2 * Math.PI * (300 + 700 * t) * t) * Math.exp(-t * 2.5) * 0.45, 0.8],
+      cloak: [(t) => Math.sin(2 * Math.PI * (1400 - 1100 * t) * t) * Math.exp(-t * 4) * 0.35, 0.5],
+    };
+    const cue = cues[kind];
+    if (!cue) return;
+    const b = this.buffer('ab-' + kind, (ctx) => synth(ctx, cue[1], cue[0], 0.9));
+    this.play(b, { volume: position ? 0.8 : 0.6, position, maxDistance: 60 });
+  }
+
   /** Ammo pack picked up: two quick metallic clicks. */
   pickup() {
     this.tone('pk1', 1320, 0.05, 0.25, 'square');

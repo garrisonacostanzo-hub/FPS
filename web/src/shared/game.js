@@ -5,8 +5,9 @@ import { BULLET_STEP, MATERIAL_IDS, accelerate, createBullet, exitDistance, pene
 import { botCosmetics, sanitizeCamo, sanitizeOutfit } from './cosmetics.js';
 import { sanitizeDifficulty } from './difficulty.js';
 import { BotBrain } from './bots.js';
-import { clamp, dist2, dist3, distToSegment, makeRng, rayBox, raySphere } from './math.js';
+import { clamp, dirFromAngles, dist2, dist3, distToSegment, makeRng, rayBox, raySphere } from './math.js';
 import { buildMap, generateCoverPoints } from './map.js';
+import { ABILITIES, ABILITY_IDS, CLOAK, GRENADE, PULSE, STIM_HEAL, abilityById } from './abilities.js';
 import { EMOTE_COOLDOWN, EMOTE_IDS } from './emotes.js';
 import { createMode } from './modes.js';
 import { createMotorState, eyeHeightOf } from './movement.js';
@@ -87,6 +88,10 @@ export class Game {
     this.zones = this.map.zones.map((z) => ({ ...z, owner: TEAM.NONE, progress: 0, contested: false }));
     this.pickups = [];         // dropped ammo packs { id, x, y, z, ammo: { weaponId: rounds }, expires, name }
     this.nextPickupId = 1;
+    this.grenades = [];        // thrown frag / smoke grenades in flight
+    this.smokes = [];          // smoke clouds { id, x, y, z, r, until }
+    this.revealed = new Map(); // entity id -> { until, team, by } (Recon Pulse)
+    this.nextObjectId = 1;
     this.mode = createMode(this.config.mode, this);
     this.botNameIndex = Math.floor(this.rng() * BOT_NAMES.length);
     this.startMatch();
@@ -106,6 +111,9 @@ export class Game {
     }
     for (const z of this.zones) { z.owner = TEAM.NONE; z.progress = 0; z.contested = false; }
     this.pickups.length = 0;
+    this.grenades.length = 0;
+    this.smokes.length = 0;
+    this.revealed.clear();
     if (this.mode.managesEnemyBots) this.removeBots(TEAM.B);
     this.rebalanceBots();
     this.respawnAll();
@@ -139,7 +147,7 @@ export class Game {
   // ==============================================================================================
   // Entities
   // ==============================================================================================
-  createEntity({ name, isBot, team, loadout, clientId, cosmetics }) {
+  createEntity({ name, isBot, team, loadout, clientId, cosmetics, ability }) {
     const id = this.nextId++;
     const look = isBot ? botCosmetics(this.rng) : cosmetics || {};
     // A weapon set id (players) or a random set (bots): everyone carries the set's four guns.
@@ -151,6 +159,9 @@ export class Game {
       motor: createMotorState(0, 0, 0, 0),
       ws: createWeaponState(guns),
       loadoutPref: guns.slice(),
+      // Special ability (players pick one; bots get a random one).
+      ability: isBot ? ABILITIES[Math.floor(this.rng() * ABILITIES.length)].id : abilityById(ability).id,
+      abilityReady: 0, prevAbility: false, dashEnd: 0, dashX: 0, dashZ: 0, cloakUntil: 0,
       clock: 0, aim01: 0, prevFire: false, sprintLock: 0,
       alive: false, hp: PLAYER.maxHealth, maxHp: PLAYER.maxHealth,
       respawnAt: this.time + 0.5, protectUntil: 0, lastDamage: -99, lastFire: -99,
@@ -166,8 +177,8 @@ export class Game {
     return e;
   }
 
-  addHuman(clientId, name, loadout, cosmetics) {
-    const e = this.createEntity({ name: name || 'Player', isBot: false, loadout, clientId, cosmetics });
+  addHuman(clientId, name, loadout, cosmetics, ability) {
+    const e = this.createEntity({ name: name || 'Player', isBot: false, loadout, clientId, cosmetics, ability });
     this.rebalanceBots();
     if (this.phase !== 'ended' && (this.mode.respawns || this.phase === 'warmup')) e.respawnAt = this.time + 0.2;
     else e.respawnAt = Infinity;
@@ -267,6 +278,11 @@ export class Game {
     refillWeapons(e.ws);
   }
 
+  /** Special ability for the next respawn. */
+  setPreferredAbility(e, id) {
+    if (ABILITY_IDS.includes(id)) e.abilityPref = id;
+  }
+
   /** Weapon set for the next respawn. */
   setPreferredSet(e, setId) {
     if (!WEAPON_SETS.some((s) => s.id === setId)) return;
@@ -318,6 +334,10 @@ export class Game {
     e.ws.reloading = false;
     e.aim01 = 0;
     e.historyCount = 0;
+    if (e.abilityPref) e.ability = e.abilityPref;
+    e.abilityReady = e.clock; // abilities are ready when you spawn
+    e.dashEnd = 0;
+    e.cloakUntil = 0;
     if (e.brain) e.brain.reset();
     if (!e.isBot) this.eventTo(e, { type: 'spawn' });
   }
@@ -356,6 +376,7 @@ export class Game {
       onShot: (actor, shot) => this.resolveShot(actor, shot),
       onNoise: (actor, radius, kind) => this.noise(actor.motor.x, actor.motor.y, actor.motor.z, radius, kind, actor),
       onReload: (actor) => this.event({ type: 'rl', id: actor.id }),
+      onAbility: (actor, ab) => this.useAbility(actor, ab),
     };
     return this._hooks;
   }
@@ -409,6 +430,7 @@ export class Game {
 
     this.stepBullets(dt);
     if (this.phase !== 'ended') this.updatePickups();
+    this.stepAbilities(dt);
     if (this.phase !== 'ended') this.mode.update(dt);
     // Squad and duel matches do not loop: the squad leader / challenger queues the next one from the end screen.
     if (this.phase === 'ended' && this.time >= this.phaseEnd && !this.config.party && !this.config.duel) {
@@ -469,6 +491,7 @@ export class Game {
   resolveShot(shooter, shot) {
     const w = shot.weapon;
     shooter.lastFire = this.time;
+    if (shooter.cloakUntil > this.time) shooter.cloakUntil = 0; // shooting breaks cloak
     const viewTime = shooter.isBot ? this.time : clamp(shooter.currentCmd ? shooter.currentCmd.vt : this.time, this.time - MAX_REWIND, this.time);
     const offset = this.time - viewTime;
     const pellets = Math.max(1, w.pellets);
@@ -655,6 +678,120 @@ export class Game {
       }
     }
   }
+
+  // ==============================================================================================
+  // Special abilities (triggered by the shared command step; effects applied here on the host)
+  // ==============================================================================================
+  useAbility(e, ab) {
+    if (!e.alive) return;
+    const m = e.motor;
+    switch (ab.id) {
+      case 'stim':
+        e.hp = Math.min(e.maxHp, e.hp + STIM_HEAL);
+        e.lastDamage = -99; // regeneration starts straight away
+        break;
+      case 'frag':
+      case 'smoke': {
+        const dir = dirFromAngles(m.yaw, m.pitch);
+        const eye = m.y + eyeHeightOf(m);
+        this.grenades.push({
+          id: this.nextObjectId++, kind: ab.id, owner: e.id, team: e.team,
+          x: m.x + dir.x * 0.5, y: eye - 0.1 + dir.y * 0.5, z: m.z + dir.z * 0.5,
+          vx: dir.x * GRENADE.speed + m.vx * 0.5, vy: dir.y * GRENADE.speed + GRENADE.up, vz: dir.z * GRENADE.speed + m.vz * 0.5,
+          fuse: this.time + (ab.id === 'frag' ? GRENADE.fuse : GRENADE.smokeFuse),
+        });
+        break;
+      }
+      case 'pulse': {
+        let n = 0;
+        for (const o of this.entities.values()) {
+          if (o === e || !o.alive || !this.mode.isHostile(e, o)) continue;
+          if (Math.hypot(o.motor.x - m.x, o.motor.z - m.z) > PULSE.range) continue;
+          this.revealed.set(o.id, { until: this.time + PULSE.time, team: e.team, by: e.id });
+          this.reportIntel(e.team, o, this.time);
+          if (!o.isBot) this.eventTo(o, { type: 'revealed', t: PULSE.time });
+          n++;
+        }
+        if (!e.isBot) this.eventTo(e, { type: 'pulse', n });
+        break;
+      }
+      case 'cloak':
+        e.cloakUntil = this.time + CLOAK.time;
+        break;
+      default:
+        break;
+    }
+    this.event({ type: 'abl', id: e.id, a: ab.id, x: r2(m.x), y: r2(m.y + 1), z: r2(m.z) });
+  }
+
+  stepAbilities(dt) {
+    // Grenades: gravity, bounce off walls / floors / the ground, then explode or pop smoke.
+    for (let i = this.grenades.length - 1; i >= 0; i--) {
+      const g = this.grenades[i];
+      g.vy -= GRENADE.gravity * dt;
+      let remaining = dt;
+      for (let step = 0; step < 3 && remaining > 1e-4; step++) {
+        const speed = Math.hypot(g.vx, g.vy, g.vz);
+        if (speed < 1e-3) break;
+        const dist = speed * remaining;
+        const hit = this.world.raycast(g.x, g.y, g.z, g.vx / speed, g.vy / speed, g.vz / speed, dist + 0.06);
+        if (!hit || hit.t > dist) {
+          g.x += g.vx * remaining; g.y += g.vy * remaining; g.z += g.vz * remaining;
+          break;
+        }
+        const t = Math.max(0, hit.t - 0.06);
+        g.x += (g.vx / speed) * t; g.y += (g.vy / speed) * t; g.z += (g.vz / speed) * t;
+        const dot = g.vx * hit.nx + g.vy * hit.ny + g.vz * hit.nz;
+        g.vx = (g.vx - 2 * dot * hit.nx) * GRENADE.restitution;
+        g.vy = (g.vy - 2 * dot * hit.ny) * GRENADE.restitution;
+        g.vz = (g.vz - 2 * dot * hit.nz) * GRENADE.restitution;
+        if (hit.ny > 0.7 && Math.abs(g.vy) < 1.2) { g.vy = 0; g.vx *= 0.7; g.vz *= 0.7; }
+        remaining -= t / speed;
+      }
+      if (g.y < 0.05) { g.y = 0.05; if (g.vy < 0) g.vy = 0; }
+      if (this.time < g.fuse) continue;
+      this.grenades.splice(i, 1);
+      if (g.kind === 'frag') this.explode(g);
+      else {
+        this.smokes.push({ id: this.nextObjectId++, x: g.x, y: g.y, z: g.z, r: GRENADE.smokeRadius, until: this.time + GRENADE.smokeTime });
+        this.event({ type: 'smoke', x: r2(g.x), y: r2(g.y), z: r2(g.z) });
+      }
+    }
+    for (let i = this.smokes.length - 1; i >= 0; i--) if (this.time >= this.smokes[i].until) this.smokes.splice(i, 1);
+    for (const [id, r] of this.revealed) if (this.time >= r.until) this.revealed.delete(id);
+  }
+
+  explode(g) {
+    this.event({ type: 'boom', x: r2(g.x), y: r2(g.y), z: r2(g.z) });
+    this.noise(g.x, g.y, g.z, 90, 'boom', null);
+    const owner = this.entities.get(g.owner) || null;
+    for (const e of [...this.entities.values()]) {
+      if (!e.alive) continue;
+      const cx = e.motor.x, cy = e.motor.y + 1.0, cz = e.motor.z;
+      const d = Math.hypot(cx - g.x, cy - g.y, cz - g.z);
+      if (d > GRENADE.radius) continue;
+      if (!this.world.lineOfSight(g.x, g.y + 0.25, g.z, cx, cy, cz) && !this.world.lineOfSight(g.x, g.y + 0.25, g.z, cx, e.motor.y + 1.6, cz)) continue;
+      const self = owner && e === owner;
+      if (owner && !self && !this.mode.isHostile(owner, e)) continue; // no friendly fire
+      const amount = GRENADE.damage * Math.max(0.15, 1 - d / GRENADE.radius) * (self ? GRENADE.selfMul : 1);
+      this.damage(e, amount, self ? null : owner, 'frag', false, g.x, g.y, g.z);
+      if (owner && !self && !owner.isBot) this.eventTo(owner, { type: 'hit', d: Math.round(amount), hs: 0, k: e.alive ? 0 : 1 });
+    }
+  }
+
+  /** True if smoke hides the line between two points (used by bot vision). */
+  smokeBlocks(ax, ay, az, bx, by, bz) {
+    for (const sm of this.smokes) {
+      const dx = bx - ax, dy = by - ay, dz = bz - az;
+      const len2 = dx * dx + dy * dy + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((sm.x - ax) * dx + (sm.y + 1 - ay) * dy + (sm.z - az) * dz) / len2));
+      const px = ax + dx * t - sm.x, py = ay + dy * t - (sm.y + 1), pz = az + dz * t - sm.z;
+      if (px * px + py * py + pz * pz < sm.r * sm.r * 0.7) return true;
+    }
+    return false;
+  }
+
+  isCloaked(e) { return e.cloakUntil > this.time; }
 
   // ==============================================================================================
   // Emotes and bot banter
@@ -860,12 +997,21 @@ export class Game {
     for (const e of this.entities.values()) {
       if (forEntity && e === forEntity) continue;
       const m = e.motor;
-      const flags = (e.alive ? 1 : 0) | (m.sprinting ? 2 : 0) | (e.aim01 > 0.5 ? 4 : 0) | (m.grounded ? 8 : 0) | (e.ws.reloading ? 16 : 0);
+      const flags = (e.alive ? 1 : 0) | (m.sprinting ? 2 : 0) | (e.aim01 > 0.5 ? 4 : 0) | (m.grounded ? 8 : 0) | (e.ws.reloading ? 16 : 0) | (e.cloakUntil > this.time ? 32 : 0);
       const slot = e.ws.slots[e.ws.active];
       ents.push([e.id, r2(m.x), r2(m.y), r2(m.z), r3(m.yaw), r3(m.pitch), r2(m.crouch), flags, slot ? slot.id : 'pistol', Math.ceil(e.hp)]);
     }
     const snap = { type: 'snap', t: r3(this.time), e: ents, m: this.hudState() };
     if (this.pickups.length) snap.pk = this.pickups.map((p) => [p.id, r2(p.x), r2(p.y), r2(p.z)]);
+    if (this.grenades.length) snap.gr = this.grenades.map((g) => [g.id, r2(g.x), r2(g.y), r2(g.z), g.kind === 'frag' ? 0 : 1]);
+    if (this.smokes.length) snap.sm = this.smokes.map((sm) => [sm.id, r2(sm.x), r2(sm.y), r2(sm.z), sm.r, r2(sm.until - this.time)]);
+    if (forEntity && this.revealed.size) {
+      const rv = [];
+      for (const [id, r] of this.revealed) {
+        if (r.by === forEntity.id || (r.team !== TEAM.NONE && r.team === forEntity.team)) rv.push(id);
+      }
+      if (rv.length) snap.rv = rv;
+    }
     if (forEntity) {
       snap.ack = forEntity.lastSeq;
       snap.you = {
@@ -876,6 +1022,7 @@ export class Game {
         ra: Number.isFinite(forEntity.respawnAt) && !forEntity.alive ? Math.max(0, r2(forEntity.respawnAt - this.time)) : -1,
         pr: this.time < forEntity.protectUntil ? 1 : 0,
         a: packActor(forEntity),
+        ck: forEntity.cloakUntil > this.time ? r2(forEntity.cloakUntil - this.time) : 0,
       };
     }
     return snap;

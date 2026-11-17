@@ -259,3 +259,68 @@ if (failures) process.exitCode = 1;
   console.log(`weapon sets: marksman -> recon after respawn; ammo pack: rifle ${10}->${rifleAfter}, dmr 0->${dmrAfter}`);
   if (failures.length) { console.log('SETS/AMMO FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('weapon set and ammo drop checks passed');
 }
+
+// ------------------------------------------------------------------------------------------------
+// Special abilities
+// ------------------------------------------------------------------------------------------------
+{
+  const failures = [];
+  const { GameHost: Host } = await import('../src/shared/host.js');
+  const { BTN } = await import('../src/shared/constants.js');
+  const { ABILITIES, GRENADE } = await import('../src/shared/abilities.js');
+  const noop = () => {};
+  const events = [];
+  const host = new Host({ mode: 'tdm', map: 'outpost', bots: 0, difficulty: 'normal' }, { send: (_c, m) => { if (m.type === 'ev') events.push(...m.l); } });
+  const a = host.join('a', 'Alpha', { set: 'assault', ability: 'dash' });
+  const b = host.join('b', 'Bravo', { set: 'assault', ability: 'frag' });
+  for (let t = 0; t < 6; t += 0.1) host.update(0.1);
+  const game = host.game;
+  let seq = 1000;
+  const cmd = (e, extra = {}) => game.processCommand(e, { s: ++seq, dt: 1 / 60, mx: 0, mz: 0, yaw: e.motor.yaw, pitch: 0, b: 0, sw: -1, r: false, vt: game.time, ...extra });
+  if (!ABILITIES.every((ab) => ab.cooldown > 0)) failures.push('ability without a cooldown');
+  if (a.ability !== 'dash' || b.ability !== 'frag') failures.push(`abilities not assigned from the join loadout: ${a.ability}, ${b.ability}`);
+  // Dash: moves several metres quickly, then goes on cooldown.
+  const x0 = a.motor.x, z0 = a.motor.z;
+  cmd(a, { b: BTN.ABILITY, mz: 1 });
+  for (let i = 0; i < 20; i++) cmd(a, { mz: 1 });
+  const moved = Math.hypot(a.motor.x - x0, a.motor.z - z0);
+  if (moved < 3) failures.push(`dash only moved ${moved.toFixed(2)} m`);
+  const before = a.motor.x;
+  cmd(a, { b: BTN.ABILITY, mz: 0 }); for (let i = 0; i < 10; i++) cmd(a);
+  if (Math.abs(a.motor.x - before) > 1) failures.push('dash fired again during its cooldown');
+  // Stim heals.
+  a.ability = 'stim'; a.abilityReady = 0; a.prevAbility = false; a.hp = 30;
+  cmd(a, { b: BTN.ABILITY });
+  if (a.hp < 79) failures.push(`stim healed to ${a.hp}`);
+  // Frag: thrown at the enemy's feet, it explodes after the fuse and hurts them.
+  b.motor.x = a.motor.x + 3; b.motor.z = a.motor.z; b.motor.y = a.motor.y; b.protectUntil = 0; b.hp = 100;
+  a.ability = 'frag'; a.abilityReady = 0; a.prevAbility = false; a.protectUntil = 0;
+  // Face +x and look down so it lands near Bravo.
+  a.motor.yaw = -Math.PI / 2;
+  cmd(a, { b: BTN.ABILITY, yaw: -Math.PI / 2, pitch: -0.9 });
+  if (game.grenades.length !== 1) failures.push('frag did not spawn a grenade');
+  for (let t = 0; t < GRENADE.fuse + 0.3; t += 1 / 30) game.step(1 / 30);
+  if (![...events, ...game.events].some((ev) => ev.type === 'boom')) failures.push('frag never exploded');
+  if (!(b.hp < 100 || !b.alive)) failures.push('frag did no damage to a nearby enemy');
+  // Smoke: blocks bot sight lines through the cloud.
+  game.smokes.push({ id: 999, x: 0, y: 0, z: 0, r: GRENADE.smokeRadius, until: game.time + 5 });
+  if (!game.smokeBlocks(-10, 1.6, 0, 10, 1.6, 0)) failures.push('smoke does not block a line through it');
+  if (game.smokeBlocks(-10, 1.6, 20, 10, 1.6, 20)) failures.push('smoke blocks a line far from it');
+  // Recon pulse reveals enemies in range to the user's team (snapshot rv).
+  b.alive = true; b.hp = 100;
+  a.ability = 'pulse'; a.abilityReady = 0; a.prevAbility = false;
+  cmd(a, { b: BTN.ABILITY });
+  const snapA = game.snapshot(a);
+  if (!snapA.rv || !snapA.rv.includes(b.id)) failures.push('recon pulse did not reveal the nearby enemy');
+  if ((game.snapshot(b).rv || []).includes(b.id)) failures.push('the revealed player sees themselves as revealed');
+  // Cloak: flag in snapshots, ends when shooting.
+  a.ability = 'cloak'; a.abilityReady = 0; a.prevAbility = false;
+  cmd(a, { b: BTN.ABILITY });
+  const flagOf = (snap, id) => (snap.e.find((r) => r[0] === id) || [])[7] || 0;
+  if (!(flagOf(game.snapshot(b), a.id) & 32)) failures.push('cloak flag missing from snapshots');
+  a.ws.nextFire = 0; a.ws.equipEnd = 0; a.sprintLock = 0;
+  cmd(a, { b: BTN.FIRE });
+  if (game.isCloaked(a)) failures.push('shooting did not break cloak');
+  console.log(`abilities: dash ${moved.toFixed(1)} m, stim -> ${Math.round(a.hp)} hp, frag left Bravo at ${b.alive ? Math.round(b.hp) + ' hp' : 'dead'}`);
+  if (failures.length) { console.log('ABILITY FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('ability checks passed');
+}

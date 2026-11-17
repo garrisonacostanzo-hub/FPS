@@ -2,6 +2,7 @@
 // Keeping this in one place guarantees that prediction replays produce the same results as the server.
 import { BTN, MOVE, PLAYER } from './constants.js';
 import { clamp, dirFromAngles, hash2, moveTowards } from './math.js';
+import { DASH, abilityById } from './abilities.js';
 import { createMotorState, eyeHeightOf, heightOf, simulateMotor } from './movement.js';
 import {
   WEAPONS, activeWeapon, canFire, canReload, consumeShot, createWeaponState, currentSpread,
@@ -20,6 +21,7 @@ export function createActor(x, y, z, yaw, loadout) {
     prevFire: false,
     sprintLock: 0,
     alive: true,
+    ability: 'dash', abilityReady: 0, prevAbility: false, dashEnd: 0, dashX: 0, dashZ: 0,
   };
 }
 
@@ -29,6 +31,7 @@ export function createActor(x, y, z, yaw, loadout) {
  * hooks.onNoise(actor, radius, kind)
  * hooks.onReload(actor, duration)
  * hooks.onSwitch(actor, slot)
+ * hooks.onAbility(actor, ability) when the ability key is pressed and its cooldown is over
  */
 export function stepCommand(actor, cmd, world, hooks) {
   const dt = clamp(cmd.dt || 0, 0, 0.05);
@@ -37,8 +40,30 @@ export function stepCommand(actor, cmd, world, hooks) {
   if (!actor.alive) {
     m.yaw = cmd.yaw; m.pitch = cmd.pitch;
     actor.prevFire = ((cmd.b | 0) & BTN.FIRE) !== 0;
+    actor.prevAbility = ((cmd.b | 0) & BTN.ABILITY) !== 0;
     return;
   }
+
+  // Special ability (edge-triggered, cooldown on the actor's clock). It uses this command's view direction.
+  m.yaw = cmd.yaw;
+  m.pitch = clamp(cmd.pitch, -1.5, 1.5);
+  const abilityHeld = ((cmd.b | 0) & BTN.ABILITY) !== 0;
+  if (abilityHeld && !actor.prevAbility && actor.clock >= (actor.abilityReady || 0)) {
+    const ab = abilityById(actor.ability);
+    actor.abilityReady = actor.clock + ab.cooldown;
+    if (ab.id === 'dash') {
+      let mx = clamp(cmd.mx || 0, -1, 1), mz = clamp(cmd.mz || 0, -1, 1);
+      if (Math.hypot(mx, mz) < 0.2) { mx = 0; mz = 1; }
+      const l = Math.hypot(mx, mz);
+      mx /= l; mz /= l;
+      const sy = Math.sin(cmd.yaw), cy = Math.cos(cmd.yaw);
+      actor.dashX = (cy * mx - sy * mz) * DASH.speed;
+      actor.dashZ = (-sy * mx - cy * mz) * DASH.speed;
+      actor.dashEnd = actor.clock + DASH.time;
+    }
+    if (hooks && hooks.onAbility) hooks.onAbility(actor, ab);
+  }
+  actor.prevAbility = abilityHeld;
 
   const ws = actor.ws;
   if (cmd.sw >= 0 && switchWeapon(ws, cmd.sw, actor.clock)) {
@@ -58,7 +83,8 @@ export function stepCommand(actor, cmd, world, hooks) {
   actor.aim01 = moveTowards(actor.aim01, aiming ? 1 : 0, dt / Math.max(0.05, w.adsTime));
   if (aiming) buttons &= ~BTN.SPRINT;
 
-  const event = simulateMotor(m, { dt, mx: cmd.mx, mz: cmd.mz, yaw: cmd.yaw, pitch: cmd.pitch, buttons }, world, w.moveMul);
+  const dash = actor.clock < (actor.dashEnd || 0) ? actor : null;
+  const event = simulateMotor(m, { dt, mx: cmd.mx, mz: cmd.mz, yaw: cmd.yaw, pitch: cmd.pitch, buttons, dash }, world, w.moveMul);
   if (m.noise > 0 && hooks && hooks.onNoise) hooks.onNoise(actor, m.noise, event === 2 ? 'land' : 'step');
 
   if (tickWeapons(ws, actor.clock, dt) && hooks && hooks.onReloadDone) hooks.onReloadDone(actor);
@@ -132,6 +158,7 @@ export function packActor(a) {
     ws.active, r3(ws.nextFire), r3(ws.reloadEnd), ws.reloading ? 1 : 0, r3(ws.equipEnd), r3(ws.bloom), r3(ws.lastShot),
     ws.slots.map((s) => [s.id, s.mag, s.reserve]),
     ws.tactical ? 1 : 0,
+    a.ability || 'dash', r3(a.abilityReady || 0), r3(a.dashEnd || 0), r3(a.dashX || 0), r3(a.dashZ || 0), a.prevAbility ? 1 : 0,
   ];
 }
 
@@ -143,6 +170,9 @@ export function unpackActor(p, a) {
   a.clock = p[13]; a.aim01 = p[14]; a.prevFire = p[15] === 1; a.sprintLock = p[16];
   ws.active = p[17]; ws.nextFire = p[18]; ws.reloadEnd = p[19]; ws.reloading = p[20] === 1; ws.equipEnd = p[21];
   ws.bloom = p[22]; ws.lastShot = p[23]; ws.tactical = p[25] === 1;
+  if (p.length > 26) {
+    a.ability = p[26]; a.abilityReady = p[27]; a.dashEnd = p[28]; a.dashX = p[29]; a.dashZ = p[30]; a.prevAbility = p[31] === 1;
+  }
   const slots = p[24];
   if (ws.slots.length !== slots.length || ws.slots.some((s, i) => s.id !== slots[i][0])) {
     ws.slots = slots.map(([id, mag, reserve]) => ({ id, mag, reserve }));

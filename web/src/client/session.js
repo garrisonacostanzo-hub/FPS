@@ -6,6 +6,7 @@ import { buildMap } from '../shared/map.js';
 import { DEG, clamp, dirFromAngles, lerp, lerpAngle, rayBox, raySphere } from '../shared/math.js';
 import { EMOTES, EMOTE_COOLDOWN, emoteById } from '../shared/emotes.js';
 import { VoiceChat } from './voice.js';
+import { abilityById } from '../shared/abilities.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { eyeHeightOf } from '../shared/movement.js';
 import { createActor, hitboxesAt, stepCommand, unpackActor } from '../shared/sim.js';
@@ -90,7 +91,7 @@ export class ClientSession {
       onResume: () => this.resume(),
       onPlayAgain: () => this.playAgain(),
       onChat: (text, team) => this.transport.send({ type: 'chat', text, team: !!team }),
-      onLoadout: (setId) => this.transport.send({ type: 'loadout', set: setId }),
+      onLoadout: (patch) => this.transport.send({ type: 'loadout', ...patch }),
       onScopeMode: () => this.input.cancelAim(),
       onEmote: (id) => this.closeEmoteWheel(id),
       onVoiceMute: (id) => { if (this.voice) this.voice.toggleMute(id); },
@@ -260,6 +261,10 @@ export class ClientSession {
 
     this.modeState = snap.m;
     this.pickupList = snap.pk || [];
+    this.grenadeList = snap.gr || [];
+    this.smokeList = snap.sm || [];
+    this.revealedIds = snap.rv ? new Set(snap.rv) : null;
+    if (snap.you) this.cloakLeft = snap.you.ck || 0;
     if (snap.m.ph !== this.phase) {
       this.phase = snap.m.ph;
       if (this.phase === 'live' && this.ended) { this.ended = false; this.hud.hideEnd(); }
@@ -402,6 +407,32 @@ export class ClientSession {
         else this.renderer.characterEmote(ev.id, em);
         return;
       }
+      case 'abl': {
+        if (ev.id === this.myId) { this.audio.ability(ev.a, null); return; }
+        const at = { x: ev.x, y: ev.y, z: ev.z };
+        this.audio.ability(ev.a, at);
+        if (ev.a === 'pulse') this.renderer.pulseRing(ev.x, ev.y - 1, ev.z);
+        else if (ev.a === 'dash' || ev.a === 'stim' || ev.a === 'cloak') this.renderer.abilityPuff(ev.a, ev.x, ev.y - 0.5, ev.z);
+        return;
+      }
+      case 'boom': {
+        this.renderer.explosion(ev.x, ev.y, ev.z);
+        this.audio.boom({ x: ev.x, y: ev.y, z: ev.z });
+        const m = this.actor.motor;
+        const d = Math.hypot(m.x - ev.x, m.y - ev.y, m.z - ev.z);
+        if (d < 20 && settings.cameraBob) this.shake = Math.max(this.shake, 1.6 * (1 - d / 20));
+        return;
+      }
+      case 'smoke':
+        this.audio.ability('smoke', { x: ev.x, y: ev.y, z: ev.z });
+        return;
+      case 'pulse':
+        this.renderer.pulseRing(this.actor.motor.x, this.actor.motor.y, this.actor.motor.z);
+        this.hud.abilityNotice(ev.n ? `RECON PULSE: ${ev.n} ${ev.n === 1 ? 'ENEMY' : 'ENEMIES'} REVEALED` : 'RECON PULSE: NO ENEMIES IN RANGE', '#5ad1ff');
+        return;
+      case 'revealed':
+        this.hud.abilityNotice('YOU WERE REVEALED BY A RECON PULSE', '#ff5a4a');
+        return;
       case 'ammo':
         this.hud.ammoPickup(ev.n, ev.from);
         this.audio.pickup();
@@ -559,7 +590,7 @@ export class ClientSession {
     );
     this.updateLook(dt);
     this.updateSway(dt);
-    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed() });
+    this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed(), ability: abilityById(this.actor.ability), cooldown: Math.max(0, (this.actor.abilityReady || 0) - this.actor.clock) });
     // T: chat to everyone · Y: team chat · B: emote wheel.
     const wantChat = this.input.consume('chat'), wantTeam = this.input.consume('teamChat'), wantWheel = this.input.consume('emote');
     if (!this.paused && !this.wheel.open && (wantChat || wantTeam)) this.openChat(wantTeam && this.teams);
@@ -980,6 +1011,7 @@ export class ClientSession {
         x: lerp(ea[1], eb[1], f), y: lerp(ea[2], eb[2], f), z: lerp(ea[3], eb[3], f),
         yaw: lerpAngle(ea[4], eb[4], f), pitch: lerp(ea[5], eb[5], f), crouch: lerp(ea[6], eb[6], f),
         alive: (eb[7] & 1) === 1, sprint: (eb[7] & 2) !== 0, weapon: eb[8], hp: eb[9],
+        cloak: (eb[7] & 32) !== 0, revealed: !!(this.revealedIds && this.revealedIds.has(id)),
       };
       this.renderPoses.set(id, pose);
       const ally = this.palette.isAlly(id, info.team);
@@ -1069,6 +1101,11 @@ export class ClientSession {
     if (this.modeState) this.hud.setStatus(this.modeState, this.myTeam, this.myId, this.roster);
     if (this.modeState && this.modeState.z) this.renderer.updateZones(this.modeState.z, performance.now() / 1000);
     this.renderer.syncPickups(this.pickupList || [], performance.now() / 1000);
+    this.renderer.syncGrenades(this.grenadeList || [], 1 / 60);
+    this.renderer.syncSmokes(this.smokeList || [], performance.now() / 1000);
+    // Special ability: icon, cooldown, and cloak / reveal status.
+    const ab = abilityById(this.actor.ability);
+    this.hud.setAbility(ab, Math.max(0, (this.actor.abilityReady || 0) - this.actor.clock), this.actor.alive, this.cloakLeft || 0);
     this.hud.showScoreboard(this.input.scoreboard && !this.ended, this.roster, this.scores, this.myId, this.teams);
 
     // Location name.

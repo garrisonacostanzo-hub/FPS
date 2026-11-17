@@ -198,6 +198,18 @@ export class Effects {
     c.until = performance.now() + 900;
   }
 
+  /** Frag grenade explosion: flash, fireball, smoke and sparks. */
+  explosion(x, y, z) {
+    const slot = this.lights.reduce((a, b) => (a.until < b.until ? a : b), this.lights[0]);
+    slot.light.position.set(x, y + 0.6, z);
+    slot.light.intensity = 60;
+    slot.light.distance = 18;
+    slot.until = performance.now() + 140;
+    for (let i = 0; i < 7; i++) this.puff(x + (Math.random() - 0.5) * 1.2, y + 0.5 + Math.random() * 0.9, z + (Math.random() - 0.5) * 1.2, i < 2 ? 0xffe0a0 : 0xff9a3a, 2.0 + Math.random() * 0.9, 0.95, 340 + Math.random() * 220);
+    for (let i = 0; i < 9; i++) this.puff(x + (Math.random() - 0.5) * 2.2, y + 0.5 + Math.random() * 1.4, z + (Math.random() - 0.5) * 2.2, 0x2e2c29, 1.6 + Math.random() * 1.2, 0.65, 1500 + Math.random() * 900);
+    this.spawnSparks(x, y + 0.3, z, 0, 1, 0, 46, 1, 0.72, 0.32);
+  }
+
   muzzleLight(position, intensity = 7) {
     const slot = this.lights.reduce((a, b) => (a.until < b.until ? a : b), this.lights[0]);
     slot.light.position.copy(position);
@@ -251,6 +263,6 @@ export class Effects {
       c.mesh.position.addScaledVector(c.vel, dt);
       c.mesh.rotation.x += c.spin.x * dt; c.mesh.rotation.y += c.spin.y * dt; c.mesh.rotation.z += c.spin.z * dt;
     }
-    for (const l of this.lights) if (now > l.until) l.light.intensity = 0;
+    for (const l of this.lights) if (now > l.until) { l.light.intensity = 0; l.light.distance = 10; }
   }
 }

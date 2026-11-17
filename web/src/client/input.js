@@ -18,7 +18,7 @@ export class Input {
     this.locked = document.pointerLockElement === canvas; // the menu may already have captured the mouse
     this.fallback = false; // playing without pointer lock
     this.touchMode = false; // on-screen touch controls drive the game (see touch.js)
-    this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, aimHold: 0, crouch: false, scoreboard: false, lookX: 0, lookY: 0, talk: false };
+    this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, aimHold: 0, crouch: false, scoreboard: false, lookX: 0, lookY: 0, talk: false, ability: false };
     this.onLockChange = null;
 
     this._keydown = (e) => this.handleKey(e, true);
@@ -173,6 +173,7 @@ export class Input {
   get fire() { return (this.mouseButtons & 1) !== 0 || this.touch.fire > 0 || this.touch.autoFire; }
   get aim() { return this.touch.aim || this.touch.aimHold > 0 || (settings.toggleAim ? this.aimToggled : (this.mouseButtons & 4) !== 0); }
   get emoteHeld() { return this.keys.has('KeyB'); }
+  get abilityHeld() { return this.keys.has('KeyF') || this.touch.ability; }
   get talkHeld() { return this.keys.has('KeyV') || this.touch.talk; }
   get scoreboard() { return this.keys.has('Tab') || this.touch.scoreboard; }
 
@@ -197,6 +198,7 @@ export class Input {
     if (this.sprint && !this.fire) b |= BTN.SPRINT;
     if (this.crouch) b |= BTN.CROUCH;
     if (this.aim) b |= BTN.AIM;
+    if (this.abilityHeld) b |= BTN.ABILITY;
     if (this.fire || this.latched.firePressed) b |= BTN.FIRE;
     this.latched.jump = false;
     this.latched.firePressed = false;
