@@ -10,6 +10,9 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Friends:** add friends with a friend code, see who's online and when they last played, and look at their rank, stats and skins.
 * **Squads:** invite friends to your squad and play Ranked or any team mode together on the same team.
 * **Showdown:** 1v1 a friend, either rated on its own ladder or just for fun.
+* **Weapon sets:** pick one of six fixed sets of four guns, and carry all four.
+* **Ammo drops:** whoever dies drops all the ammo they had; walk over it to refill your guns.
+* **Emotes, text chat and voice chat:** an emote wheel on **B**, all and team chat, and push-to-talk voice in online matches.
 * **Adaptive bots:** they get tougher the better you are and the more you play.
 * **62 skins:** 50 weapon camos (most earned in Ranked) and 12 operator outfits.
 * **Progression:** levels, XP and career stats, saved in cookies and browser storage.
@@ -19,7 +22,7 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 
 1. Open **`VANGUARD.html`** in Chrome, Edge, Firefox or Safari. Double-clicking it works and no web server is needed.
 2. On the **PLAY** tab, pick a mode, a map, the bot count and the bot difficulty. The default difficulty, **Adaptive**, matches your skill.
-3. Choose your primary weapon and click **START MATCH**.
+3. Choose your weapon set and click **START MATCH**.
 
 ## Play online
 
@@ -46,6 +49,19 @@ Some rules:
 
   To use online play on a managed network, ask its IT staff to allow `0.peerjs.com` and WebRTC.
 * Advanced: to use your own PeerJS signaling server, open `VANGUARD.html?signal=your-host:9000`. Everyone in a match must use the same server.
+
+## Emotes, chat and voice chat
+
+**Emote wheel.** Hold **B** (or tap **😀** on a phone), then point the mouse at an emote and let go of B, or click it. Everyone near you sees it: a bubble over your head and a short animation (wave, nod, cheer, flex...). Your own emote shows at the bottom of your screen. The eight emotes are fixed: **Wave, GG, Nice, LOL, Cheer, Too Easy, Oops, Flex**. Bots emote and say "gg" too, so you see them offline.
+
+**Text chat.** Press **T** (or tap **💬**) to chat with everyone, or **Y** for team chat (team modes; marked **[TEAM]** and only sent to your team). **Tab** switches between the two while typing. Recent messages stay on screen for 10 seconds and come back while you type.
+
+**Voice chat** (online matches). Everyone in the match who has voice on is connected directly to everyone else (peer-to-peer, like the rest of online play).
+* **Push to talk** (default): you hear the others, and you talk while holding **V** (or **🎙** on a phone). The browser asks for the microphone the first time you press it. If you block it, you can still listen.
+* **Open mic:** your microphone is always on.
+* **Off:** no voice at all.
+
+**🎙 TALKING** shows while you're sending, and **🔊 Name** shows whoever is talking. The pause menu lists everyone in voice with a **MUTE** button for each. Change the mode and volume under Settings → Voice chat.
 
 ## Friends, squads and Showdown 1v1
 
@@ -124,7 +140,9 @@ The same file has touch controls. They turn on automatically when you touch the 
 | Aim down sights | **Tap AIM** to scope in and tap it again to scope out. Drag your thumb after tapping to look around. It never fires. (Settings can switch it to hold-to-aim.) |
 | Crouch | **CROUCH** (tap to toggle) |
 | Jump / reload | **JUMP** / **RELOAD** |
-| Switch weapon | Tap the weapon and ammo panel (⇄) |
+| Switch weapon | Tap the weapon and ammo panel (⇄) to go to the next gun in your set |
+| Emote wheel / chat | **😀** / **💬** at the top right |
+| Push to talk (online) | Hold **🎙** (left side, shown when voice chat is on) |
 | Scoreboard / pause | **☰** / **II** at the top right |
 
 **Aiming help** (change it under Settings → Touch controls):
@@ -185,14 +203,17 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 | Crouch | `Ctrl` / `C` (hold or toggle, set in Settings) |
 | Fire / Aim down sights | Left mouse / Right mouse: click to scope in, click again to scope out (Settings can switch to hold) |
 | Reload | `R` |
-| Switch weapon | `1` `2`, `Q` `E`, mouse wheel |
+| Switch weapon | `1` `2` `3` `4`, `Q` `E`, mouse wheel |
 | Scoreboard | `Tab` |
-| Chat | `T` / `Enter` |
-| Pause / menu | `Esc` |
+| Chat to everyone / team chat | `T` (or `Enter`) / `Y` (`Tab` while typing switches between them) |
+| Emote wheel | Hold `B`, move the mouse toward an emote, let go (or click) |
+| Push to talk (online) | Hold `V` |
+| Pause / menu | `Esc` (has the **TOGGLE SCOPE** switch at the top) |
 
 If the browser or an embedding frame refuses mouse capture (pointer lock), the game switches to free-cursor mouse look. Clicking in-game tries to capture the mouse again.
 
-**Settings** has five sections. The main menu's SETTINGS tab and the in-game pause menu show the same options:
+**Settings** has six sections. The main menu's SETTINGS tab and the in-game pause menu show the same options:
+* **Voice chat:** Push to talk (default), Open mic or Off, and voice volume.
 * **Teams & visibility:** see "Telling teams apart" above.
 * **Touch controls:** listed above.
 * **Mouse & keyboard:**
@@ -330,7 +351,27 @@ To move your progress to another browser or device, use **BARRACKS → Backup co
 
 ## Weapons
 
-Pistol, SMG, rifle, shotgun, LMG, DMR and sniper. Each weapon has its own fire rate, damage falloff, headshot multiplier, spread (hip, ADS, moving and in the air), recoil, magazine size and reload time, ADS zoom, movement speed, muzzle velocity, drag and penetration power. All of these values are in one data table: `src/shared/weapons.js`.
+**Weapon sets.** You don't pick single guns. You pick one of six fixed sets and carry all four of its guns (slots 1-4):
+
+| Set | Guns (slot 1 → 4) | Style |
+|---|---|---|
+| **Assault** | Rifle, SMG, Shotgun, Pistol | Rifle for mid range, SMG and shotgun close up |
+| **Close Quarters** | SMG, Shotgun, DMR, Pistol | Fast and close, DMR for picks at range |
+| **Breacher** | Shotgun, SMG, LMG, Pistol | Clear rooms, hold lanes |
+| **Heavy** | LMG, Rifle, Shotgun, Pistol | Sustained fire |
+| **Marksman** | DMR, Rifle, SMG, Pistol | Precise mid-to-long range |
+| **Recon** | Sniper, DMR, SMG, Pistol | Long range with a close backup |
+
+Choose the set on the PLAY / ONLINE tabs or in **ARMORY → WEAPON SETS**. In a match, change it from the pause menu: it applies when you next respawn. Gun Game ignores sets and uses its own ladder. Bots also carry sets and switch to the gun that suits the distance to their target.
+
+**Ammo drops.** Whoever dies (players and bots) drops everything they were carrying as a glowing ammo can, which lasts 30 seconds. The first living player to walk over it takes it:
+* rounds for a gun you also carry go straight into its reserve
+* your other guns get the same share of a full load that the pack held
+* reserves never go above a fresh loadout's
+
+If your guns are already full, you leave the pack for someone else. "+90 AMMO" shows when you pick one up.
+
+**The guns.** Pistol, SMG, rifle, shotgun, LMG, DMR and sniper. Each weapon has its own fire rate, damage falloff, headshot multiplier, spread (hip, ADS, moving and in the air), recoil, magazine size and reload time, ADS zoom, movement speed, muzzle velocity, drag and penetration power. All of these values are in one data table: `src/shared/weapons.js`.
 
 ## Gun physics
 
@@ -442,7 +483,7 @@ web/
    │  ├─ math.js            # vector/angle helpers, seeded RNG, ray tests
    │  ├─ world.js           # AABB collision world + raycasts (grid broadphase)
    │  ├─ movement.js        # player motor: walk/sprint/crouch/jump, step-up, coyote time
-   │  ├─ weapons.js         # weapon data table + fire/reload/switch state machine
+   │  ├─ weapons.js         # weapon data table, the six weapon sets, fire/reload/switch state machine
    │  ├─ sim.js             # per-command step (movement + weapons), hitboxes, packing
    │  ├─ map.js             # procedural map builders, zones, spawns, cover points
    │  ├─ nav.js             # 2.5D nav grid + A* + path smoothing
@@ -451,6 +492,7 @@ web/
    │  ├─ difficulty.js      # continuous bot levels (blends Recruit..Apex presets)
    │  ├─ ballistics.js      # bullet flight (velocity, drag, gravity), materials and penetration
    │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers, Showdown titles
+   │  ├─ emotes.js          # the eight emotes on the wheel
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
    │  └─ host.js            # fixed-tick match host, client bindings, network messages
    └─ client/               # browser only
@@ -458,6 +500,8 @@ web/
       ├─ menu.js            # CoD-style menu: Play, Ranked, Friends, Online, Armory, Barracks, Settings
       ├─ profile.js         # level/XP, stats, skill rating algorithm, Ranked SR, Showdown rating, unlocks
       ├─ social.js          # friend codes, presence, friend requests, squads, 1v1 challenges (peer-to-peer)
+      ├─ voice.js           # voice chat: peer-to-peer mesh, push to talk, speaking indicators, mute
+      ├─ netcheck.js        # CHECK CONNECTION: what a network blocks (matchmaking, direct, relay)
       ├─ ui/friendsTab.js   # FRIENDS tab, friend profiles and the squad bar
       ├─ ui/toasts.js       # pop-up notifications (requests, invites, challenges)
       ├─ ui/art.js          # small SVG operator portraits

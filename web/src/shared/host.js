@@ -1,6 +1,6 @@
 // Transport-agnostic game host: binds connected clients to entities, runs the fixed-rate simulation,
 // and emits snapshots/events. Runs in the browser: offline (in-memory) or as an online host (WebRTC peers).
-import { PROTOCOL_VERSION, TICK_DT } from './constants.js';
+import { PROTOCOL_VERSION, TEAM, TICK_DT } from './constants.js';
 import { Game } from './game.js';
 
 export class GameHost {
@@ -22,8 +22,9 @@ export class GameHost {
 
   get playerCount() { return this.clients.size; }
 
-  join(clientId, name, loadout, cosmetics) {
-    const entity = this.game.addHuman(clientId, sanitizeName(name), loadout, cosmetics);
+  /** @param {string} setId the player's weapon set */
+  join(clientId, name, setId, cosmetics) {
+    const entity = this.game.addHuman(clientId, sanitizeName(name), setId, cosmetics);
     this.clients.set(clientId, { entityId: entity.id, name: entity.name });
     this.send(clientId, {
       type: 'welcome',
@@ -46,6 +47,7 @@ export class GameHost {
     const entity = this.game.entities.get(client.entityId);
     this.clients.delete(clientId);
     this.game.removeHuman(client.entityId);
+    if (client.voice) this.broadcastVoice();
     if (entity) this.game.announce(`${entity.name} left`, entity.team);
   }
 
@@ -59,20 +61,46 @@ export class GameHost {
         this.game.queueCommands(entity, msg.c);
         break;
       case 'loadout':
-        this.game.setPreferredPrimary(entity, msg.primary);
+        this.game.setPreferredSet(entity, String(msg.set || ''));
         break;
       case 'ping':
         this.send(clientId, { type: 'pong', t: msg.t, st: this.game.time });
         if (typeof msg.rtt === 'number') entity.ping = Math.max(0, Math.min(999, msg.rtt));
         break;
       case 'chat': {
-        const text = String(msg.text || '').slice(0, 120).replace(/[<>]/g, '');
-        if (text) this.broadcast({ type: 'ev', l: [{ type: 'chat', id: entity.id, text }] });
+        const text = String(msg.text || '').slice(0, 120).replace(/[<>]/g, '').trim();
+        if (!text) break;
+        if (this.game.time - (entity.lastChat ?? -9) < 0.6) break; // flood guard
+        entity.lastChat = this.game.time;
+        // Team chat goes only to teammates (in modes with teams); everything else to everyone.
+        const team = !!msg.team && this.game.mode.teams && entity.team !== TEAM.NONE;
+        const ev = { type: 'chat', id: entity.id, text, tm: team ? 1 : 0 };
+        if (!team) { this.broadcast({ type: 'ev', l: [ev] }); break; }
+        for (const [cid, c] of this.clients) {
+          const ce = this.game.entities.get(c.entityId);
+          if (ce && ce.team === entity.team) this.send(cid, { type: 'ev', l: [ev] });
+        }
+        break;
+      }
+      case 'emote':
+        this.game.emote(entity, String(msg.e || ''));
+        break;
+      case 'voice': {
+        // Voice chat: remember this player's peer id (empty = left voice) and tell everyone who is in voice.
+        const pid = String(msg.pid || '');
+        client.voice = /^vanguard-fps-[A-Za-z0-9-]{1,48}$/.test(pid) ? pid : '';
+        this.broadcastVoice();
         break;
       }
       default:
         break;
     }
+  }
+
+  broadcastVoice() {
+    const l = [];
+    for (const c of this.clients.values()) if (c.voice) l.push([c.entityId, c.voice]);
+    this.broadcast({ type: 'voice', l });
   }
 
   broadcast(msg) {

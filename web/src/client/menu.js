@@ -5,7 +5,7 @@ import { CAMOS, OUTFITS, RARITY, rankForSr } from '../shared/cosmetics.js';
 import { difficultyName } from '../shared/difficulty.js';
 import { MAP_LIST } from '../shared/map.js';
 import { MODE_LIST, SQUAD_TEAM_SIZE } from '../shared/modes.js';
-import { PRIMARY_WEAPONS, WEAPONS } from '../shared/weapons.js';
+import { WEAPONS, WEAPON_SETS, weaponSet } from '../shared/weapons.js';
 import { camoSwatch } from './gfx/textures.js';
 import { CODE_LENGTH, isEmbedded, normalizeCode, webrtcSupported } from './net.js';
 import { checkConnection, verdictText } from './netcheck.js';
@@ -132,7 +132,7 @@ export class MainMenu {
     // Viewing a friend shows their operator and camo.
     const friend = this.tab === 'friends' && this.friendSel ? social.data.friends[this.friendSel] : null;
     if (friend && friend.card) { camo = friend.card.eq.camo; outfit = friend.card.eq.outfit; }
-    this.showcase.setLook({ camo, outfit, weapon: settings.primary });
+    this.showcase.setLook({ camo, outfit, weapon: weaponSet(settings.weaponSet).guns[0] });
     this.showcase.setFocus(this.tab === 'armory' && this.armoryKind === 'camo' ? 'weapon' : 'operator');
   }
 
@@ -234,14 +234,16 @@ export class MainMenu {
   }
 
   weaponField() {
-    return `<div class="m-field"><label>PRIMARY WEAPON</label><div class="m-chips">${PRIMARY_WEAPONS.map((id) => `<button class="${settings.primary === id ? 'on' : ''}" data-primary="${id}">${WEAPONS[id].name.toUpperCase()}</button>`).join('')}</div></div>`;
+    const cur = weaponSet(settings.weaponSet);
+    return `<div class="m-field"><label>WEAPON SET <output>${cur.guns.map((g) => esc(WEAPONS[g].name.split(' ')[0].toUpperCase())).join(' · ')}</output></label>
+      <div class="m-chips">${WEAPON_SETS.map((ws) => `<button class="${cur.id === ws.id ? 'on' : ''}" data-wset="${ws.id}">${esc(ws.name.toUpperCase())}</button>`).join('')}</div></div>`;
   }
 
   bindCommon(prefix, apply) {
     const root = this.root;
     root.querySelectorAll(`[data-${prefix}diff]`).forEach((b) => b.addEventListener('click', () => { this.click(); apply('difficulty', b.dataset[prefix + 'diff']); this.render(); }));
     root.querySelectorAll(`[data-${prefix}map]`).forEach((b) => b.addEventListener('click', () => { this.click(); apply('map', b.dataset[prefix + 'map']); this.render(); }));
-    root.querySelectorAll('[data-primary]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ primary: b.dataset.primary }); this.render(); }));
+    root.querySelectorAll('[data-wset]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ weaponSet: b.dataset.wset }); this.render(); }));
   }
 
   // ------------------------------------------------------------------------------------------------
@@ -375,7 +377,7 @@ export class MainMenu {
             <div class="m-reward"><span class="m-swatch" style="background-image:url(${camoSwatch(c.id)})"></span>
               <div><b style="color:${RARITY[c.rarity].color}">${c.name.toUpperCase()}</b><small>${esc(req.text)}</small>
               <div class="m-bar thin"><i style="width:${pct(req.have, req.need)}%"></i></div></div></div>`).join('')}</div>` : ''}
-          <p class="m-note">Loadout: <b>${WEAPONS[settings.primary].name}</b> + ${WEAPONS.pistol.name} · camo <b>${esc(camoName(profile.equipped.camo))}</b>. Change them in the Armory.</p>
+          <p class="m-note">Weapon set: <b>${esc(weaponSet(settings.weaponSet).name)}</b> (${weaponSet(settings.weaponSet).guns.map((g) => esc(WEAPONS[g].name)).join(', ')}) · camo <b>${esc(camoName(profile.equipped.camo))}</b>. Change them in the Armory.</p>
           ${social.squadSize > 1 ? this.squadNote('ranked') + this.squadStartButton('start-ranked', 'RANKED TDM · 5V5', social.squadSize > SQUAD_TEAM_SIZE.ranked ? `Your squad has ${social.squadSize} players but Ranked allows ${SQUAD_TEAM_SIZE.ranked} per team.` : '')
             : `<button class="m-start" id="start-ranked" ${this.webgl ? '' : 'disabled'}><b>PLAY RANKED</b><small>TEAM DEATHMATCH · 5V5</small></button>`}
         </section>
@@ -510,19 +512,26 @@ export class MainMenu {
     const kind = this.armoryKind;
     const camoCount = CAMOS.filter((c) => isCamoUnlocked(c.id)).length;
     const outfitCount = OUTFITS.filter((o) => isOutfitUnlocked(o.id)).length;
-    const sub = [['camo', `WEAPON CAMOS ${camoCount}/${CAMOS.length}`], ['outfit', `OPERATORS ${outfitCount}/${OUTFITS.length}`], ['loadout', 'LOADOUT']];
+    const sub = [['camo', `WEAPON CAMOS ${camoCount}/${CAMOS.length}`], ['outfit', `OPERATORS ${outfitCount}/${OUTFITS.length}`], ['loadout', 'WEAPON SETS']];
     let grid = '', detail = '';
     if (kind === 'loadout') {
-      grid = `<div class="m-weapons">${PRIMARY_WEAPONS.map((id) => {
-        const w = WEAPONS[id];
-        const dps = Math.round((w.damage * w.pellets * w.rpm) / 60);
-        return `<button class="m-weapon ${settings.primary === id ? 'on' : ''}" data-primary="${id}"><b>${w.name.toUpperCase()}</b>
-          <div class="m-wstat"><span>DAMAGE</span><i style="width:${pct(w.damage * w.pellets, 100)}%"></i></div>
-          <div class="m-wstat"><span>FIRE RATE</span><i style="width:${pct(w.rpm, 950)}%"></i></div>
-          <div class="m-wstat"><span>RANGE</span><i style="width:${pct(w.falloff[1], 600)}%"></i></div>
-          <small>${w.mode.toUpperCase()} · ${w.mag} RDS · ${dps} DPS</small></button>`;
-      }).join('')}</div>`;
-      detail = `<h1>${WEAPONS[settings.primary].name.toUpperCase()}</h1><p class="m-desc">Your primary weapon. The secondary is always the ${WEAPONS.pistol.name}. Gun Game overrides your loadout.</p>`;
+      // Weapon sets: fixed groups of four guns. You choose the set, not the individual guns.
+      const bar = (label, v) => `<div class="m-wstat"><span>${label}</span><i style="width:${pct(v, 1)}%"></i></div>`;
+      grid = `<div class="m-sets">${WEAPON_SETS.map((ws) => `
+        <button class="m-set ${settings.weaponSet === ws.id ? 'on' : ''}" data-wset="${ws.id}">
+          <b>${esc(ws.name.toUpperCase())}</b><small>${esc(ws.blurb)}</small>
+          <ol>${ws.guns.map((g, i) => {
+            const w = WEAPONS[g];
+            const dps = Math.round((w.damage * w.pellets * w.rpm) / 60);
+            return `<li><em>${i + 1}</em><span>${esc(w.name.toUpperCase())}</span><small>${w.mode.toUpperCase()} · ${dps} DPS · ${w.falloff[1]} M</small></li>`;
+          }).join('')}</ol>
+        </button>`).join('')}</div>`;
+      const cur = weaponSet(settings.weaponSet);
+      detail = `<h1>${esc(cur.name.toUpperCase())}</h1>
+        <p class="m-desc">${esc(cur.blurb)} You carry all four guns: switch with <b>1 2 3 4</b>, Q / E or the mouse wheel (touch: the ⇄ button).</p>
+        ${cur.guns.map((g) => { const w = WEAPONS[g]; return `<div class="m-weapon static"><b>${esc(w.name.toUpperCase())}</b>
+          ${bar('DAMAGE', (w.damage * w.pellets) / 100)}${bar('FIRE RATE', w.rpm / 950)}${bar('RANGE', w.falloff[1] / 600)}</div>`; }).join('')}
+        <p class="m-note">Sets are fixed: you can't swap single guns in or out. Gun Game gives everyone its own ladder of guns instead.</p>`;
     } else {
       const items = kind === 'camo' ? CAMOS : OUTFITS;
       const equipped = kind === 'camo' ? profile.equipped.camo : profile.equipped.outfit;
@@ -560,7 +569,7 @@ export class MainMenu {
     const root = this.root;
     root.querySelectorAll('[data-kind]').forEach((b) => b.addEventListener('click', () => { this.click(); this.armoryKind = b.dataset.kind; this.armorySel = null; this.render(); }));
     root.querySelectorAll('[data-item]').forEach((b) => b.addEventListener('click', () => { this.click(); this.armorySel = b.dataset.item; this.render(); }));
-    root.querySelectorAll('[data-primary]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ primary: b.dataset.primary }); this.render(); }));
+    root.querySelectorAll('[data-wset]').forEach((b) => b.addEventListener('click', () => { this.click(); saveSettings({ weaponSet: b.dataset.wset }); this.render(); }));
     const eq = root.querySelector('#equip-item');
     if (eq) eq.addEventListener('click', () => { this.click(); equip(this.armoryKind, this._armoryCurrent); this.render(); });
   }

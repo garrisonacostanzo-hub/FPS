@@ -358,7 +358,7 @@ export class HostTransport {
         return;
       }
       remote.joined = true;
-      const loadout = Array.isArray(msg.loadout) ? msg.loadout.slice(0, 2).map(String) : ['rifle', 'pistol'];
+      const loadout = typeof msg.set === 'string' ? msg.set.slice(0, 24) : 'assault';
       const look = msg.cosmetics && typeof msg.cosmetics === 'object' ? { camo: String(msg.cosmetics.camo || ''), outfit: String(msg.cosmetics.outfit || '') } : null;
       this.host.join(clientId, msg.name, loadout, look);
       return;
@@ -493,7 +493,7 @@ export class JoinTransport {
           watchLink(conn, () => { if (!settled) fail('Lost the connection to the host while joining.'); else this.lost('Lost connection to the host.'); });
           this.snap = openSnapChannel(conn);
           if (this.snap) this.snap.onmessage = (e) => this.receive(e.data);
-          conn.send(JSON.stringify({ type: 'hello', v: PROTOCOL_VERSION, name, loadout, cosmetics }));
+          conn.send(JSON.stringify({ type: 'hello', v: PROTOCOL_VERSION, name, set: loadout, cosmetics }));
         });
         conn.on('data', (data) => {
           let msg;

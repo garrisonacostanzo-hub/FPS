@@ -124,12 +124,21 @@ export class BotBrain {
     if (this.aimWanted && this.targetVisible) cmd.b |= BTN.AIM;
     if (this.reloadWanted) { cmd.r = true; this.reloadWanted = false; }
 
-    // Switch to the sidearm when the primary is completely empty.
+    // Weapon choice: leave an empty gun, and use the gun from the weapon set that suits the target's distance.
     const ws = e.ws;
     const slot = ws.slots[ws.active];
-    if (slot && slot.mag === 0 && slot.reserve === 0 && ws.slots.length > 1) {
-      const other = ws.active === 0 ? 1 : 0;
-      if (ws.slots[other].mag + ws.slots[other].reserve > 0) cmd.sw = other;
+    const hasAmmo = (sl) => sl.mag + sl.reserve > 0;
+    if (slot && !hasAmmo(slot) && ws.slots.length > 1) {
+      const next = ws.slots.findIndex((sl) => hasAmmo(sl));
+      if (next >= 0) cmd.sw = next;
+    } else if (slot && ws.slots.length > 1 && this.target && this.targetVisible && !ws.reloading && this.now >= (this.nextGunCheck || 0)) {
+      this.nextGunCheck = this.now + 1.2 + this.rng() * 0.8;
+      const d = Math.hypot(this.target.motor.x - e.motor.x, this.target.motor.z - e.motor.z);
+      const fits = (id, slack) => { const r = WEAPONS[id].botRange; return d >= r[0] * (1 - slack) && d <= r[1] * (1 + slack); };
+      if (!fits(slot.id, 0.25)) {
+        const best = ws.slots.findIndex((sl) => hasAmmo(sl) && fits(sl.id, 0));
+        if (best >= 0 && best !== ws.active) cmd.sw = best;
+      }
     }
     return cmd;
   }

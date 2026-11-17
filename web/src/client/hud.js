@@ -2,7 +2,8 @@
 // minimap, scoreboard, death / end screens, pause & settings menu and chat.
 import { TEAM, TEAM_NAMES } from '../shared/constants.js';
 import { MODE_LIST } from '../shared/modes.js';
-import { WEAPONS } from '../shared/weapons.js';
+import { EMOTES } from '../shared/emotes.js';
+import { WEAPONS, WEAPON_SETS } from '../shared/weapons.js';
 import { saveSettings, settings } from './settings.js';
 import { RARITY } from '../shared/cosmetics.js';
 import { difficultyName } from '../shared/difficulty.js';
@@ -15,17 +16,19 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class Hud {
-  constructor(root, { map, modeId, online, isHost, roomCode, palette, onLeave, onResume, onPlayAgain, onChat, onLoadout }) {
+  constructor(root, { map, modeId, online, isHost, roomCode, palette, onLeave, onResume, onPlayAgain, onChat, onLoadout, onEmote, onScopeMode, onVoiceMute }) {
     this.root = root;
     this.map = map;
     this.modeId = modeId;
     this.mode = MODE_LIST.find((m) => m.id === modeId) || MODE_LIST[0];
+    this.teams = !!this.mode.teams;
+    this.chatTeam = false;
     this.online = online;
     this.isHost = !!isHost;
     this.palette = palette;
     this.crossTarget = null;
     this.roomCode = roomCode || '';
-    this.callbacks = { onLeave, onResume, onPlayAgain, onChat, onLoadout };
+    this.callbacks = { onLeave, onResume, onPlayAgain, onChat, onLoadout, onEmote, onScopeMode, onVoiceMute };
     this.root.innerHTML = TEMPLATE;
     this.root.classList.add('active');
     this.el = {
@@ -48,14 +51,20 @@ export class Hud {
     this.el.chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         const text = this.el.chatInput.value.trim();
-        if (text && this.callbacks.onChat) this.callbacks.onChat(text);
+        if (text && this.callbacks.onChat) this.callbacks.onChat(text, this.chatTeam);
         this.closeChat();
         e.preventDefault();
       } else if (e.key === 'Escape') {
         this.closeChat();
+      } else if (e.key === 'Tab' && this.teams) {
+        // Tab switches between everyone and your team while typing.
+        e.preventDefault();
+        this.setChatTeam(!this.chatTeam);
       }
       e.stopPropagation();
     });
+    const send = this.root.querySelector('#chat-send');
+    send.addEventListener('pointerdown', (e) => { e.preventDefault(); this.el.chatInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); });
     this.applySettings();
   }
 
@@ -183,16 +192,106 @@ export class Hud {
     this.el.streak.classList.add('show');
   }
 
-  chatMessage(name, text, team) {
-    const row = document.createElement('div');
-    row.innerHTML = `<b style="color:${team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ddd'}">${esc(name)}:</b> ${esc(text)}`;
-    this.el.chat.appendChild(row);
-    while (this.el.chat.children.length > 6) this.el.chat.firstChild.remove();
-    setTimeout(() => row.classList.add('fade'), 9000);
+  // ------------------------------------------------------------------------------------------------
+  // Emote wheel (B)
+  // ------------------------------------------------------------------------------------------------
+  showEmoteWheel(show, touch) {
+    const el = this.root.querySelector('#emote-wheel');
+    el.classList.toggle('open', show);
+    el.classList.toggle('touch', !!touch);
+    const hint = el.querySelector('.ew-center small');
+    hint.textContent = touch ? 'Tap an emote' : 'Move the mouse to pick, let go of B (or click)';
+    if (!show) this.setEmoteSelection(-1);
+    if (show && !this._ewBound) {
+      this._ewBound = true;
+      el.querySelectorAll('[data-emote]').forEach((b) => b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.callbacks.onEmote) this.callbacks.onEmote(b.dataset.emote);
+      }));
+      el.addEventListener('pointerdown', (e) => { if (e.target === el && this.callbacks.onEmote) this.callbacks.onEmote(null); });
+    }
   }
 
-  openChat() {
-    this.el.chatInput.style.display = 'block';
+  setEmoteSelection(index) {
+    const el = this.root.querySelector('#emote-wheel');
+    el.querySelectorAll('.ew-item').forEach((b, i) => b.classList.toggle('on', i === index));
+    const em = EMOTES[index];
+    el.querySelector('.ew-center b').textContent = em ? `${em.icon} ${em.label}` : 'EMOTES';
+  }
+
+  /** Your own emote (you can't see your own character in first person). */
+  selfEmote(em) {
+    const el = this.root.querySelector('#self-emote');
+    el.innerHTML = `<i>${em.icon}</i><b>${em.label}</b>`;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+  }
+
+  // ------------------------------------------------------------------------------------------------
+  // Voice chat
+  // ------------------------------------------------------------------------------------------------
+  /** Who is talking right now, and your own microphone state. */
+  setVoiceStatus(st) {
+    const el = this.root.querySelector('#voice-panel');
+    const self = st.mode === 'off' ? ''
+      : st.transmitting ? '<div class="vp-self on">🎙 TALKING</div>'
+      : st.mic === 'asking' ? '<div class="vp-self">🎙 Allow the microphone…</div>'
+      : st.mic === 'denied' ? '<div class="vp-self off">🎙 Microphone blocked: listening only</div>'
+      : '';
+    const rows = st.speakers.map((p) => `<div class="vp-row"><i>🔊</i><b style="color:${p.team === TEAM.A || p.team === TEAM.B ? this.palette.team(p.team) : '#fff'}">${esc(p.name)}</b></div>`).join('');
+    const html = self + rows;
+    if (html !== this._voiceHtml) { this._voiceHtml = html; el.innerHTML = html; }
+    const hint = this.root.querySelector('#chat-hint');
+    const text = `T chat · Y team · B emotes${st.mode === 'ptt' ? ' · hold V to talk' : st.mode === 'open' ? ' · open mic' : ''}`;
+    if (hint.textContent !== text) hint.textContent = text;
+  }
+
+  /** Voice block in the pause menu: everyone in voice with a MUTE button. */
+  setVoiceMembers(list, online) {
+    const box = this.el.pause.querySelector('.voice-members');
+    if (!box) return;
+    if (!online) { box.innerHTML = ''; return; }
+    if (!list) { box.innerHTML = '<p class="sub">Voice chat is off (change it under Voice chat below).</p>'; return; }
+    box.innerHTML = list.length
+      ? `<b>IN VOICE</b>${list.map((m) => `<div class="vm-row"><span>${esc(m.name)}${m.connected ? '' : ' <small>connecting…</small>'}</span><button data-vmute="${m.id}" class="${m.muted ? 'on' : ''}">${m.muted ? 'MUTED' : 'MUTE'}</button></div>`).join('')}`
+      : '<p class="sub">Nobody else is in voice yet.</p>';
+    box.querySelectorAll('[data-vmute]').forEach((b) => b.addEventListener('click', () => this.callbacks.onVoiceMute && this.callbacks.onVoiceMute(Number(b.dataset.vmute))));
+  }
+
+  /** "+90 AMMO" after walking over a dropped ammo pack. */
+  ammoPickup(rounds, from) {
+    const el = this.root.querySelector('#ammo-gain');
+    if (!el) return;
+    el.innerHTML = `+${rounds} AMMO${from ? `<small>${esc(from)}'s pack</small>` : ''}`;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+  }
+
+  /** Adds a line to the chat log. Lines fade after a while but come back while you are typing. */
+  chatMessage(name, text, team, teamOnly = false, bot = false) {
+    const row = document.createElement('div');
+    const color = team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ddd';
+    row.innerHTML = `${teamOnly ? '<em>[TEAM]</em> ' : ''}<b style="color:${color}">${esc(name)}${bot ? ' <small>BOT</small>' : ''}:</b> ${esc(text)}`;
+    if (teamOnly) row.classList.add('team');
+    this.el.chat.appendChild(row);
+    while (this.el.chat.children.length > 12) this.el.chat.firstChild.remove();
+    setTimeout(() => row.classList.add('fade'), 10000);
+  }
+
+  setChatTeam(team) {
+    this.chatTeam = !!team;
+    this.el.chatInput.placeholder = this.chatTeam ? 'Message your TEAM… (Enter to send, Tab: everyone)' : `Message EVERYONE… (Enter to send${this.teams ? ', Tab: team only' : ''})`;
+    this.root.querySelector('#chat-box').classList.toggle('team', this.chatTeam);
+    this.root.querySelector('#chat-mode').textContent = this.chatTeam ? 'TEAM' : 'ALL';
+  }
+
+  openChat(team = false) {
+    this.setChatTeam(team && this.teams);
+    this.root.querySelector('#chat-box').style.display = 'flex';
+    this.el.chat.classList.add('typing');
     this.el.chatInput.value = '';
     this.el.chatInput.focus();
     this.chatOpen = true;
@@ -200,7 +299,8 @@ export class Hud {
 
   closeChat() {
     this.el.chatInput.blur();
-    this.el.chatInput.style.display = 'none';
+    this.root.querySelector('#chat-box').style.display = 'none';
+    this.el.chat.classList.remove('typing');
     this.chatOpen = false;
     if (this.callbacks.onResume) this.callbacks.onResume();
   }
@@ -405,7 +505,8 @@ export class Hud {
   // ------------------------------------------------------------------------------------------------
   buildPause() {
     const el = this.el.pause;
-    const primaryOptions = ['rifle', 'smg', 'shotgun', 'lmg', 'dmr', 'sniper'].map((id) => `<option value="${id}" ${settings.primary === id ? 'selected' : ''}>${WEAPONS[id].name}</option>`).join('');
+    const setOptions = WEAPON_SETS.map((ws) => `<option value="${ws.id}" ${settings.weaponSet === ws.id ? 'selected' : ''}>${esc(ws.name)}: ${ws.guns.map((g) => esc(WEAPONS[g].name.split(' ')[0])).join(', ')}</option>`).join('');
+    const toggleOn = settings.toggleAim && settings.aimButton === 'toggle';
     el.innerHTML = `
       <div class="panel">
         <h2>PAUSED</h2>
@@ -418,13 +519,27 @@ export class Hud {
           ? 'You are hosting: friends open VANGUARD.html, choose ONLINE and enter this code. Keep this tab open — the match runs in your browser.'
           : 'Online match — the game keeps running while paused.'}</p>`
           : '<p class="sub">Offline match — the game keeps running.</p>'}
-        <label class="set"><span>Primary weapon (next respawn)</span><select data-k="primary" data-type="select">${primaryOptions}</select></label>
+        <div class="quick-set">
+          <span><b>TOGGLE SCOPE</b><small>ON: click / tap AIM to scope in, again to scope out. OFF: hold to aim.</small></span>
+          <button data-act="togglescope" class="switch ${toggleOn ? 'on' : ''}" aria-pressed="${toggleOn}">${toggleOn ? 'ON' : 'OFF'}</button>
+        </div>
+        <label class="set"><span>Weapon set (next respawn)</span><select data-k="weaponSet" data-type="select">${setOptions}</select></label>
+        ${this.online ? '<div class="voice-members"></div>' : ''}
+        <p class="sub keys">T chat · Y team chat · B emote wheel${this.online ? ' · V push to talk' : ''} · 1-4 weapons</p>
         ${renderSettingsSections({ inGame: true, open: [touchSettingsRelevant() ? 'touch' : 'mouse'] })}
       </div>`;
     bindSettingsControls(el, (k, value) => {
       if (k.startsWith('crosshair')) this.applyCrosshairStyle();
       if (k === 'showMinimap' || k === 'showFps') this.applySettings();
-      if (k === 'primary' && this.callbacks.onLoadout) this.callbacks.onLoadout(value);
+      if (k === 'weaponSet' && this.callbacks.onLoadout) this.callbacks.onLoadout(value);
+      if (k === 'toggleAim' || k === 'aimButton') this.syncScopeSwitch();
+    });
+    // One switch for both mouse (right-click) and touch (AIM button).
+    el.querySelector('[data-act="togglescope"]').addEventListener('click', () => {
+      const on = !(settings.toggleAim && settings.aimButton === 'toggle');
+      saveSettings({ toggleAim: on, aimButton: on ? 'toggle' : 'hold' });
+      if (this.callbacks.onScopeMode) this.callbacks.onScopeMode(on);
+      this.syncScopeSwitch();
     });
     el.querySelector('[data-act="resume"]').addEventListener('click', () => this.callbacks.onResume && this.callbacks.onResume());
     el.querySelector('[data-act="leave"]').addEventListener('click', () => this.callbacks.onLeave && this.callbacks.onLeave());
@@ -445,6 +560,18 @@ export class Hud {
         setTimeout(() => { copy.textContent = 'COPY'; }, 1500);
       });
     }
+  }
+
+  /** Keeps the TOGGLE SCOPE switch and the detailed settings below it in step. */
+  syncScopeSwitch() {
+    const el = this.el.pause;
+    const on = settings.toggleAim && settings.aimButton === 'toggle';
+    const btn = el.querySelector('[data-act="togglescope"]');
+    if (btn) { btn.classList.toggle('on', on); btn.textContent = on ? 'ON' : 'OFF'; btn.setAttribute('aria-pressed', String(on)); }
+    const mouse = el.querySelector('[data-k="toggleAim"]');
+    if (mouse) mouse.checked = settings.toggleAim;
+    const touch = el.querySelector('[data-k="aimButton"]');
+    if (touch) touch.value = settings.aimButton;
   }
 
   showPause(show) {
@@ -640,6 +767,12 @@ const TEMPLATE = `
   <div id="breath"><span>HOLD SHIFT TO STEADY</span><div class="bar"><i></i></div></div>
   <div id="protect">SPAWN PROTECTION</div>
   <div id="vitals"><div id="team-badge" class="label"></div><div class="label">HEALTH</div><div id="hp-value">100</div><div class="bar"><div id="hp-fill"></div></div></div>
+  <div id="ammo-gain"></div>
+  <div id="emote-wheel" aria-hidden="true">
+    ${EMOTES.map((em, i) => { const a = (i / EMOTES.length) * Math.PI * 2; return `<button class="ew-item" data-emote="${em.id}" style="left:calc(50% + ${(Math.sin(a) * 140).toFixed(1)}px);top:calc(50% - ${(Math.cos(a) * 140).toFixed(1)}px)"><i>${em.icon}</i><b>${em.label}</b></button>`; }).join('')}
+    <div class="ew-center"><b>EMOTES</b><small>Move the mouse to pick, let go of B</small></div>
+  </div>
+  <div id="self-emote"></div>
   <div id="ammo"><div id="weapon-name"></div><div class="count"><span id="ammo-mag">30</span><span class="sep">/</span><span id="ammo-reserve">120</span></div><div id="weapon-slots"></div></div>
   <div id="reload-bar"><div id="reload-fill"></div><span>RELOADING</span></div>
   <div id="death"><div id="death-text"></div><div id="death-timer"></div></div>
@@ -647,6 +780,8 @@ const TEMPLATE = `
   <div id="endscreen"></div>
   <div id="pause"></div>
   <div id="chat-log"></div>
-  <input id="chat-input" maxlength="120" placeholder="Say something… (Enter to send)">
+  <div id="chat-box"><span id="chat-mode">ALL</span><input id="chat-input" maxlength="120" placeholder="Say something… (Enter to send)" autocomplete="off"><button id="chat-send">SEND</button></div>
+  <div id="chat-hint">T chat · Y team · B emotes</div>
   <div id="netstats"></div>
+  <div id="voice-panel"></div>
 `;

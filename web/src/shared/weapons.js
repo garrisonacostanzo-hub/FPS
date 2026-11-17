@@ -58,6 +58,22 @@ export const WEAPONS = {
 };
 
 export const PRIMARY_WEAPONS = ['rifle', 'smg', 'shotgun', 'lmg', 'dmr', 'sniper'];
+
+// WEAPON SETS: you pick one of these fixed sets instead of single guns, and carry all four (slots 1-4).
+export const WEAPON_SETS = [
+  { id: 'assault', name: 'Assault', guns: ['rifle', 'smg', 'shotgun', 'pistol'], blurb: 'Rifle for mid range, SMG and shotgun for close quarters.' },
+  { id: 'cqb', name: 'Close Quarters', guns: ['smg', 'shotgun', 'dmr', 'pistol'], blurb: 'Fast and close, with a DMR for picking people off at range.' },
+  { id: 'breacher', name: 'Breacher', guns: ['shotgun', 'smg', 'lmg', 'pistol'], blurb: 'Clear rooms with the shotgun, hold lanes with the LMG.' },
+  { id: 'heavy', name: 'Heavy', guns: ['lmg', 'rifle', 'shotgun', 'pistol'], blurb: 'Sustained fire: a huge LMG magazine backed by a rifle.' },
+  { id: 'marksman', name: 'Marksman', guns: ['dmr', 'rifle', 'smg', 'pistol'], blurb: 'Precise mid-to-long range with an SMG for emergencies.' },
+  { id: 'recon', name: 'Recon', guns: ['sniper', 'dmr', 'smg', 'pistol'], blurb: 'Long range: sniper and DMR, SMG when they get close.' },
+];
+export const DEFAULT_SET = 'assault';
+
+/** The weapon set with this id (falls back to the default set). */
+export function weaponSet(id) {
+  return WEAPON_SETS.find((s) => s.id === id) || WEAPON_SETS[0];
+}
 export const SECONDARY_WEAPONS = ['pistol'];
 export const BOT_PRIMARY_POOL = ['rifle', 'rifle', 'rifle', 'smg', 'smg', 'shotgun', 'lmg', 'dmr', 'sniper'];
 export const GUNGAME_LADDER = ['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'dmr', 'sniper', 'pistol'];
@@ -74,7 +90,7 @@ export function damageAt(w, distance) {
   return w.damage * (1 + (minMul - 1) * t);
 }
 
-/** Creates the per-entity weapon state for a loadout (array of weapon ids, max 2). */
+/** Creates the per-entity weapon state for a loadout (array of weapon ids, up to 4: a weapon set). */
 export function createWeaponState(loadout) {
   return {
     slots: loadout.map((id) => ({ id, mag: WEAPONS[id].mag, reserve: WEAPONS[id].reserve })),

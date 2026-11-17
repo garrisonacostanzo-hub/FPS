@@ -26,6 +26,15 @@ export const SETTINGS_SECTIONS = [
     ],
   },
   {
+    id: 'voice',
+    title: 'Voice chat',
+    items: [
+      { k: 'voiceChat', label: 'Voice chat (online matches)', type: 'select', options: [['ptt', 'Push to talk (hold V or 🎙)'], ['open', 'Open mic (always on)'], ['off', 'Off']],
+        hint: 'You hear the other players in the match. Your browser asks to use the microphone the first time you talk.' },
+      { k: 'voiceVolume', label: 'Voice volume', type: 'range', min: 0, max: 1, step: 0.05, fmt: pct },
+    ],
+  },
+  {
     id: 'teams',
     title: 'Teams & visibility',
     items: [

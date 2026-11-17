@@ -4,10 +4,12 @@ import * as THREE from 'three';
 import { BTN, TEAM } from '../shared/constants.js';
 import { buildMap } from '../shared/map.js';
 import { DEG, clamp, dirFromAngles, lerp, lerpAngle, rayBox, raySphere } from '../shared/math.js';
+import { EMOTES, EMOTE_COOLDOWN, emoteById } from '../shared/emotes.js';
+import { VoiceChat } from './voice.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { eyeHeightOf } from '../shared/movement.js';
 import { createActor, hitboxesAt, stepCommand, unpackActor } from '../shared/sim.js';
-import { WEAPONS, activeWeapon, currentSpread, spreadDirection } from '../shared/weapons.js';
+import { WEAPONS, activeWeapon, currentSpread, spreadDirection, weaponSet } from '../shared/weapons.js';
 import { World } from '../shared/world.js';
 import { Hud } from './hud.js';
 import { Input } from './input.js';
@@ -43,6 +45,7 @@ export class ClientSession {
     // What guests are told when this player (as host) closes the room.
     this.closeReason = squad && squad.leader ? 'Your squad leader went back to the lobby.' : undefined;
     this.sawOpponent = false;
+    this.wheel = { open: false, touch: false, x: 0, y: 0, sel: -1 };
     this.audio = audio;
     this.onExit = onExit;
     this.myId = welcome.id;
@@ -86,12 +89,17 @@ export class ClientSession {
       onLeave: () => this.leave(),
       onResume: () => this.resume(),
       onPlayAgain: () => this.playAgain(),
-      onChat: (text) => this.transport.send({ type: 'chat', text }),
-      onLoadout: (primary) => this.transport.send({ type: 'loadout', primary }),
+      onChat: (text, team) => this.transport.send({ type: 'chat', text, team: !!team }),
+      onLoadout: (setId) => this.transport.send({ type: 'loadout', set: setId }),
+      onScopeMode: () => this.input.cancelAim(),
+      onEmote: (id) => this.closeEmoteWheel(id),
+      onVoiceMute: (id) => { if (this.voice) this.voice.toggleMute(id); },
     });
     this.touchUI = new TouchControls(hudRoot, this.input, {
       onPause: () => { if (!this.paused) this.input.releaseLock(); },
       onScoreboard: () => {},
+      onEmote: () => (this.wheel.open ? this.closeEmoteWheel(null) : this.openEmoteWheel(true)),
+      onChat: () => this.openChat(false),
     });
     this.touchUI.setEnabled(touchControlsWanted());
     // "Auto" touch mode follows the last thing the player used: a finger or a mouse.
@@ -103,7 +111,7 @@ export class ClientSession {
     window.addEventListener('pointerdown', this._pointerKind, true);
     this.crosshairTarget = false;
 
-    this.actor = createActor(0, 0, 0, 0, [settings.primary, 'pistol']);
+    this.actor = createActor(0, 0, 0, 0, weaponSet(settings.weaponSet).guns);
     this.actor.id = this.myId;
     this.actor.alive = false;
     this.scratch = createActor(0, 0, 0, 0, ['rifle', 'pistol']);
@@ -148,7 +156,13 @@ export class ClientSession {
       this.renderer.applyPixelRatio();
       if (this.touchUI) this.touchUI.refresh();
       if (this.hud) this.hud.applySettings();
+      if (this.voice) { this.voice.setMode(settings.voiceChat); this.voice.applyVolumes(); }
     });
+
+    // Voice chat (online matches only): see voice.js.
+    this.voice = !this.offline && transport.peer ? new VoiceChat({ transport, myId: this.myId, onChange: () => this.voiceChanged() }) : null;
+    if (this.voice) this.voice.setMode(settings.voiceChat);
+    this.voiceTimer = 0;
 
     this.applyRoster(welcome.roster);
     this.transport.setHandler((msg) => this.onMessage(msg));
@@ -165,7 +179,10 @@ export class ClientSession {
     switch (msg.type) {
       case 'snap': return this.onSnapshot(msg);
       case 'ev': for (const ev of msg.l) this.onEvent(ev); return undefined;
-      case 'roster': return this.applyRoster(msg.l);
+      case 'roster': { const r = this.applyRoster(msg.l); this.voiceChanged(); return r; }
+      case 'voice':
+        if (this.voice) this.voice.setRoster(msg.l);
+        return undefined;
       case 'scores':
         for (const [id, kills, deaths, score, tier, ping] of msg.l) this.scores.set(id, { kills, deaths, score, tier, ping });
         for (const [id, s] of this.scores) { const r = this.roster.get(id); if (r) r.tier = s.tier; }
@@ -242,6 +259,7 @@ export class ClientSession {
     while (this.snapshots.length > 30) this.snapshots.shift();
 
     this.modeState = snap.m;
+    this.pickupList = snap.pk || [];
     if (snap.m.ph !== this.phase) {
       this.phase = snap.m.ph;
       if (this.phase === 'live' && this.ended) { this.ended = false; this.hud.hideEnd(); }
@@ -377,9 +395,22 @@ export class ClientSession {
       case 'end':
         this.showEnd(ev.text, ev.team, ev.winner);
         return;
+      case 'emote': {
+        const em = emoteById(ev.e);
+        if (!em) return;
+        if (ev.id === this.myId) this.hud.selfEmote(em);
+        else this.renderer.characterEmote(ev.id, em);
+        return;
+      }
+      case 'ammo':
+        this.hud.ammoPickup(ev.n, ev.from);
+        this.audio.pickup();
+        return;
+      case 'pkup':
+        return;
       case 'chat': {
         const r = this.roster.get(ev.id);
-        this.hud.chatMessage(r ? r.name : '?', ev.text, r ? r.team : TEAM.NONE);
+        this.hud.chatMessage(r ? r.name : '?', ev.text, r ? r.team : TEAM.NONE, ev.tm === 1, r && r.isBot);
         return;
       }
       case 'rl':
@@ -497,6 +528,7 @@ export class ClientSession {
     this.touchUI.dispose();
     this.input.dispose();
     this.unsubscribeSettings();
+    if (this.voice) { this.voice.dispose(); this.voice = null; }
     this.hud.destroy();
     this.renderer.dispose();
     this.transport.close(this.closeReason);
@@ -528,10 +560,12 @@ export class ClientSession {
     this.updateLook(dt);
     this.updateSway(dt);
     this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed() });
-    if (!this.paused && this.input.consume('chat')) {
-      this.input.releaseLock();
-      this.hud.openChat();
-    }
+    // T: chat to everyone · Y: team chat · B: emote wheel.
+    const wantChat = this.input.consume('chat'), wantTeam = this.input.consume('teamChat'), wantWheel = this.input.consume('emote');
+    if (!this.paused && !this.wheel.open && (wantChat || wantTeam)) this.openChat(wantTeam && this.teams);
+    if (!this.paused && wantWheel && !this.wheel.open && !this.hud.chatOpen) this.openEmoteWheel(false);
+    this.updateEmoteWheel();
+    this.updateVoice(dt);
 
     // Fixed-rate command generation (60 Hz) with prediction.
     this.cmdAccumulator += dt;
@@ -577,6 +611,14 @@ export class ClientSession {
   updateLook(dt) {
     const look = this.input.consumeLook();
     if (this.paused) { this.lookDX = 0; this.lookDY = 0; return; }
+    // While the emote wheel is open the mouse picks an emote instead of turning the view.
+    if (this.wheel.open && !this.wheel.touch) {
+      const w = this.wheel;
+      w.x += look.x; w.y += look.y;
+      const len = Math.hypot(w.x, w.y);
+      if (len > 140) { w.x *= 140 / len; w.y *= 140 / len; }
+      look.x = 0; look.y = 0;
+    }
     const w = activeWeapon(this.actor.ws);
     const aim = this.actor.aim01;
     const zoom = aim > 0.01 ? lerp(1, (w.adsFov / settings.fov) * settings.adsSensitivity / 0.8, aim) : 1;
@@ -626,7 +668,7 @@ export class ClientSession {
       mz: active ? input.moveZ : 0,
       yaw: this.viewYaw + this.recoilYaw + this.sway.yaw,
       pitch: clamp(this.viewPitch + this.recoilPitch + this.sway.pitch, -1.5, 1.5),
-      b: active ? input.buildButtons() : 0,
+      b: active && !this.wheel.open ? input.buildButtons() : 0,
       sw,
       r: active ? input.consume('reload') : false,
       vt: this.estimatedServerTime() - this.interpDelay,
@@ -646,6 +688,72 @@ export class ClientSession {
     const w = activeWeapon(this.actor.ws);
     const breathKey = (w.id === 'sniper' || w.id === 'dmr') && !this.touchUI.enabled;
     if (!this.actor.alive || this.ended || switching >= 0 || (active && sprintPressed && !breathKey && input.moveZ > 0)) input.cancelAim();
+  }
+
+  // ==============================================================================================
+  // Chat and emotes
+  // ==============================================================================================
+  // ==============================================================================================
+  // Voice chat
+  // ==============================================================================================
+  updateVoice(dt) {
+    const v = this.voice;
+    if (!v) return;
+    v.setTalking(this.input.talkHeld && !this.paused && !this.hud.chatOpen);
+    this.voiceTimer -= dt;
+    if (this.voiceTimer > 0) return;
+    this.voiceTimer = 0.12;
+    const name = (id) => (this.roster.get(id) || {}).name || '?';
+    this.hud.setVoiceStatus({
+      mode: v.mode, transmitting: v.transmitting, mic: v.micState, touch: this.touchUI.enabled,
+      speakers: v.mode === 'off' ? [] : v.speakers().map((id) => ({ name: name(id), team: (this.roster.get(id) || {}).team })),
+    });
+  }
+
+  voiceChanged() {
+    if (!this.hud) return;
+    const v = this.voice;
+    if (this.touchUI) this.touchUI.el.classList.toggle('voice', !!v && v.mode !== 'off');
+    this.hud.setVoiceMembers(v && v.mode !== 'off' ? v.members().map((m) => ({ ...m, name: (this.roster.get(m.id) || {}).name || '?' })) : null, !!v);
+  }
+
+  openChat(team) {
+    // Mark the chat open first: releasing the mouse (or, on touch, pausing input) must not show the pause menu.
+    this.hud.openChat(team);
+    this.input.releaseLock();
+    this.hud.showPause(false);
+    this.hud.el.chatInput.focus();
+  }
+
+  openEmoteWheel(touch) {
+    if (!this.actor.alive || this.ended) return;
+    this.wheel = { open: true, touch, x: 0, y: 0, sel: -1 };
+    this.hud.showEmoteWheel(true, touch);
+  }
+
+  /** Mouse picks the wedge it points at; releasing B (or clicking) plays it. */
+  updateEmoteWheel() {
+    const w = this.wheel;
+    if (!w.open) return;
+    if (!this.actor.alive || this.paused || this.ended) { this.closeEmoteWheel(null); return; }
+    if (w.touch) return;
+    const len = Math.hypot(w.x, w.y);
+    const sel = len > 35 ? Math.round(((Math.atan2(w.x, -w.y) / (Math.PI * 2)) * EMOTES.length + EMOTES.length)) % EMOTES.length : -1;
+    if (sel !== w.sel) { w.sel = sel; this.hud.setEmoteSelection(sel); }
+    if (this.input.consume('firePressed')) { this.closeEmoteWheel(sel >= 0 ? EMOTES[sel].id : null); return; }
+    if (!this.input.emoteHeld) this.closeEmoteWheel(sel >= 0 ? EMOTES[sel].id : null);
+  }
+
+  closeEmoteWheel(id) {
+    const wasTouch = this.wheel.touch;
+    this.wheel = { open: false, touch: false, x: 0, y: 0, sel: -1 };
+    this.hud.showEmoteWheel(false);
+    if (!id) return;
+    const now = performance.now();
+    if (now - (this.lastEmoteSent || 0) < EMOTE_COOLDOWN * 1000) return;
+    this.lastEmoteSent = now;
+    this.transport.send({ type: 'emote', e: id });
+    if (wasTouch) this.input.touch.fire = 0;
   }
 
   /** Is this enemy visible from the camera (not behind a wall)? Re-checked about 8 times a second per enemy. */
@@ -960,6 +1068,7 @@ export class ClientSession {
     this.hud.setTeamBadge(this.myTeam, this.teams, this.modeId);
     if (this.modeState) this.hud.setStatus(this.modeState, this.myTeam, this.myId, this.roster);
     if (this.modeState && this.modeState.z) this.renderer.updateZones(this.modeState.z, performance.now() / 1000);
+    this.renderer.syncPickups(this.pickupList || [], performance.now() / 1000);
     this.hud.showScoreboard(this.input.scoreboard && !this.ended, this.roster, this.scores, this.myId, this.teams);
 
     // Location name.

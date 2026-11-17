@@ -22,7 +22,8 @@ const toasts = new Toasts();
 let session = null;
 let joiningRoom = false;
 
-const loadout = () => [settings.primary, 'pistol'];
+// The player's weapon set id (the host gives them that set's four guns).
+const loadout = () => settings.weaponSet;
 const cosmetics = () => ({ camo: profile.equipped.camo, outfit: profile.equipped.outfit });
 // "Adaptive" difficulty becomes the player's current bot level (skill rating + experience, see profile.js).
 const resolveDifficulty = (config) => ({ ...config, difficulty: config.difficulty === 'adaptive' ? adaptiveBotLevel() : config.difficulty });

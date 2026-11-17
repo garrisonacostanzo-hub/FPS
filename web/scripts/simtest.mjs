@@ -206,3 +206,56 @@ if (failures) process.exitCode = 1;
   }
   if (failures.length) { console.log('SQUAD/DUEL FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('squad and duel checks passed');
 }
+
+// ------------------------------------------------------------------------------------------------
+// Weapon sets and ammo drops
+// ------------------------------------------------------------------------------------------------
+{
+  const failures = [];
+  const { GameHost: Host } = await import('../src/shared/host.js');
+  const { WEAPONS, WEAPON_SETS } = await import('../src/shared/weapons.js');
+  const noop = () => {};
+  const host = new Host({ mode: 'tdm', map: 'outpost', bots: 4, difficulty: 'normal' }, { send: noop });
+  const a = host.join('a', 'Alpha', 'marksman');
+  const b = host.join('b', 'Bravo', 'heavy');
+  const ids = (e) => e.ws.slots.map((s) => s.id).join(',');
+  if (ids(a) !== 'dmr,rifle,smg,pistol') failures.push(`marksman set gave ${ids(a)}`);
+  if (ids(b) !== 'lmg,rifle,shotgun,pistol') failures.push(`heavy set gave ${ids(b)}`);
+  const bots = [...host.game.entities.values()].filter((e) => e.isBot);
+  if (!bots.every((e) => e.ws.slots.length === 4 && WEAPON_SETS.some((ws) => ws.guns.join(',') === ids(e)))) failures.push('bots do not carry a full weapon set');
+  host.join('c', 'Charlie', 'no-such-set');
+  const c = [...host.game.entities.values()].find((e) => e.name === 'Charlie');
+  if (ids(c) !== WEAPON_SETS[0].guns.join(',')) failures.push('unknown set id was not replaced by the default');
+  for (let t = 0; t < 6; t += 0.1) host.update(0.1); // past warmup, everyone alive
+  // Ammo drop: Bravo dies carrying ammo; Alpha (low on rifle ammo) walks over the pack.
+  b.ws.slots[1].mag = 20; b.ws.slots[1].reserve = 60;
+  const rifle = a.ws.slots.find((s) => s.id === 'rifle');
+  rifle.reserve = 10;
+  const dmr = a.ws.slots.find((s) => s.id === 'dmr');
+  dmr.reserve = 0;
+  host.game.kill(b, a, 'rifle', false);
+  const pack = host.game.pickups[host.game.pickups.length - 1];
+  if (!pack || pack.ammo.rifle !== 80 || pack.ammo.lmg !== WEAPONS.lmg.mag + WEAPONS.lmg.reserve) failures.push(`pack contents wrong: ${JSON.stringify(pack && pack.ammo)}`);
+  a.motor.x = pack.x; a.motor.z = pack.z; a.motor.y = pack.y;
+  host.game.updatePickups();
+  const rifleAfter = rifle.reserve, dmrAfter = dmr.reserve;
+  if (rifleAfter !== Math.min(WEAPONS.rifle.reserve, 10 + 80)) failures.push(`rifle reserve after pickup ${rifleAfter}`);
+  if (!(dmrAfter > 0)) failures.push('a gun the victim did not carry (DMR) got no ammo from the pack');
+  if (host.game.pickups.includes(pack)) failures.push('pack was not removed after pickup');
+  // A full player leaves packs alone.
+  const full = c;
+  for (const s of full.ws.slots) s.reserve = WEAPONS[s.id].reserve;
+  host.game.dropAmmo(a);
+  const pack2 = host.game.pickups[host.game.pickups.length - 1];
+  full.motor.x = pack2.x; full.motor.z = pack2.z; full.motor.y = pack2.y;
+  for (const e of host.game.entities.values()) if (e !== full) e.alive = false;
+  host.game.updatePickups();
+  if (!host.game.pickups.includes(pack2)) failures.push('a player with full ammo picked up a pack');
+  // Changing set applies at the next respawn.
+  host.game.setPreferredSet(a, 'recon');
+  a.alive = false;
+  host.game.respawnEntity(a);
+  if (ids(a) !== 'sniper,dmr,smg,pistol') failures.push(`new set after respawn: ${ids(a)}`);
+  console.log(`weapon sets: marksman -> recon after respawn; ammo pack: rifle ${10}->${rifleAfter}, dmr 0->${dmrAfter}`);
+  if (failures.length) { console.log('SETS/AMMO FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('weapon set and ammo drop checks passed');
+}

@@ -22,9 +22,13 @@ export const DEFAULTS = {
   renderScale: 1,        // fraction of the quality preset's resolution
   dynamicResolution: true, // lower the resolution automatically while the frame rate is low
   quality: coarsePointer() ? 'medium' : 'high', // phones/tablets default to a lighter renderer
-  primary: 'rifle',
+  primary: 'rifle',      // (older saves) replaced by weaponSet
+  weaponSet: 'assault',  // fixed set of four guns, see WEAPON_SETS
   toggleCrouch: false,
   toggleAim: true,       // right mouse: click to scope in, click again to scope out (false = hold)
+  // Voice chat in online matches.
+  voiceChat: 'ptt',      // 'ptt' (hear everyone, hold V / 🎙 to talk) | 'open' (mic always on) | 'off'
+  voiceVolume: 0.9,
   // Touch controls (phones/tablets).
   touchControls: 'auto', // 'auto' | 'on' | 'off'
   aimButton: 'toggle',   // 'toggle' (tap to scope in / out, drag to look) | 'hold' (aim while held, drag to look)
@@ -62,6 +66,11 @@ function load() {
     const stored = JSON.parse(localStorage.getItem(KEY) || '{}');
     const merged = { ...DEFAULTS, ...stored };
     if (typeof merged.autoFire === 'boolean') merged.autoFire = merged.autoFire ? 'hip' : 'off'; // older saves
+    // Weapon sets replaced the single primary-weapon choice: start older saves on the set led by their old gun.
+    if (!stored.weaponSet && stored.primary) {
+      const lead = { rifle: 'assault', smg: 'cqb', shotgun: 'breacher', lmg: 'heavy', dmr: 'marksman', sniper: 'recon' };
+      merged.weaponSet = lead[stored.primary] || 'assault';
+    }
     // Toggle aim became the default: switch older saves over once (the settings can still switch back to hold).
     if ((stored.aimV || 0) < 2) {
       merged.toggleAim = true;

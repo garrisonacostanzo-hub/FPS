@@ -80,6 +80,57 @@ function buildMapMeshes(map, scene, quality) {
 // ---------------------------------------------------------------------------------------------------------------
 // Labels and markers
 // ---------------------------------------------------------------------------------------------------------------
+/** Dropped ammo pack: an olive ammo can with a yellow band and handle, floating over a glowing ring. */
+function buildAmmoPack() {
+  const g = new THREE.Group();
+  const crate = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.26, 0.24), mat('#4b5a2e', { rough: 0.7, metal: 0.25 }));
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.06, 0.245), new THREE.MeshStandardMaterial({ color: 0xf2c230, emissive: 0x6b4d00, roughness: 0.5 }));
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.04, 0.26), mat('#3b4724', { rough: 0.6, metal: 0.4 }));
+  lid.position.y = 0.15;
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.012, 6, 12, Math.PI), mat('#222', { rough: 0.4, metal: 0.8 }));
+  handle.position.y = 0.17;
+  crate.add(body, band, lid, handle);
+  crate.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.5, 28), new THREE.MeshBasicMaterial({
+    color: new THREE.Color(2.4, 1.9, 0.5), transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+  }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.03;
+  g.add(crate, ring);
+  g.userData = { crate, ring };
+  return g;
+}
+
+const EMOTE_TIME = 2.4;
+
+/** Emote bubble: the emote's icon in a rounded tag with its label. */
+function emoteSprite(emote) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(10,12,16,0.82)';
+  g.strokeStyle = 'rgba(255,255,255,0.85)';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.roundRect ? g.roundRect(18, 10, 220, 92, 22) : g.rect(18, 10, 220, 92);
+  g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(116, 102); g.lineTo(128, 120); g.lineTo(140, 102); g.closePath(); g.fill();
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.font = '56px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+  g.fillStyle = '#fff';
+  g.fillText(emote.icon, 70, 58);
+  g.font = '700 30px "Barlow Condensed", "Arial Narrow", system-ui, sans-serif';
+  g.fillText(emote.label, 168, 58, 120);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, fog: false }));
+  sprite.scale.set(1.3, 0.65, 1);
+  sprite.renderOrder = 11;
+  return sprite;
+}
+
 function nameSprite(text, color) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
@@ -182,11 +233,13 @@ class CharacterModel {
     } else {
       this.legL.rotation.x += (-crouch * 0.6 - this.legL.rotation.x) * Math.min(1, dt * 10);
       this.legR.rotation.x += (crouch * 0.3 - this.legR.rotation.x) * Math.min(1, dt * 10);
+      this.body.position.y = 0; // set every frame, so emote hops never accumulate
     }
     this.deathBlend += ((p.alive ? 0 : 1) - this.deathBlend) * Math.min(1, dt * 6);
     this.body.rotation.x = -this.deathBlend * 1.45;
     if (this.deathBlend > 0.01) this.body.position.y = this.deathBlend * 0.15;
     if (this.label) this.label.visible = p.alive;
+    this.animateEmote(p);
     return speed;
   }
 
@@ -210,8 +263,77 @@ class CharacterModel {
     return out;
   }
 
+  /** Starts an emote: an icon bubble over the head and a short body animation (see animateEmote). */
+  playEmote(emote) {
+    this.clearBubble();
+    this.emote = { id: emote.id, start: performance.now() };
+    this.bubble = emoteSprite(emote);
+    this.bubble.position.set(0, 2.62, 0);
+    this.root.add(this.bubble);
+  }
+
+  clearBubble() {
+    if (!this.bubble) return;
+    this.root.remove(this.bubble);
+    this.bubble.material.map.dispose();
+    this.bubble.material.dispose();
+    this.bubble = null;
+  }
+
+  /** Layered on top of the normal pose each frame while an emote plays (2.4 s). */
+  animateEmote(p) {
+    this.body.rotation.y = 0; this.body.rotation.z = 0; this.armPivot.rotation.z = 0; this.headPivot.rotation.z = 0;
+    if (!this.emote) return;
+    const t = (performance.now() - this.emote.start) / 1000;
+    if (t > EMOTE_TIME || !p.alive) { this.emote = null; this.clearBubble(); return; }
+    const k = Math.min(1, t * 5) * Math.min(1, (EMOTE_TIME - t) * 5); // ease in and out
+    const toward = (from, to) => from + (to - from) * k;
+    this.bubble.position.y = 2.62 + Math.min(1, t * 6) * 0.1;
+    this.bubble.material.opacity = Math.min(1, (EMOTE_TIME - t) * 3);
+    switch (this.emote.id) {
+      case 'wave':
+        this.armPivot.rotation.x = toward(p.pitch, -1.25);
+        this.armPivot.rotation.z = Math.sin(t * 11) * 0.38 * k;
+        break;
+      case 'cheer':
+        this.armPivot.rotation.x = toward(p.pitch, -1.6);
+        this.body.position.y += Math.abs(Math.sin(t * 7)) * 0.2 * k;
+        break;
+      case 'flex':
+        this.armPivot.rotation.x = toward(p.pitch, -0.9);
+        this.armPivot.rotation.z = Math.sin(t * 5) * 0.15 * k;
+        this.body.rotation.y = Math.sin(t * 2.5) * 0.35 * k;
+        break;
+      case 'gg':
+        this.headPivot.rotation.x = toward(p.pitch * 0.6, Math.abs(Math.sin(t * 7)) * 0.45);
+        this.armPivot.rotation.x = toward(p.pitch, 0.35);
+        break;
+      case 'nice':
+        this.armPivot.rotation.x = toward(p.pitch, -0.7);
+        this.headPivot.rotation.x = toward(p.pitch * 0.6, Math.sin(t * 6) * 0.25);
+        break;
+      case 'lol':
+        this.headPivot.rotation.x = toward(p.pitch * 0.6, -0.4);
+        this.body.rotation.z = Math.sin(t * 24) * 0.06 * k;
+        this.body.position.y += Math.abs(Math.sin(t * 12)) * 0.04 * k;
+        break;
+      case 'cool':
+        this.body.rotation.x = -0.14 * k;
+        this.headPivot.rotation.z = 0.22 * k;
+        this.armPivot.rotation.x = toward(p.pitch, 0.5);
+        break;
+      case 'oops':
+        this.headPivot.rotation.z = Math.sin(t * 3.5) * 0.3 * k;
+        this.armPivot.rotation.x = toward(p.pitch, 0.7);
+        break;
+      default:
+        this.body.rotation.y = Math.sin(t * 6) * 0.5 * k;
+    }
+  }
+
   dispose(scene) {
     this.setLabel(null);
+    this.clearBubble();
     scene.remove(this.root);
   }
 }
@@ -381,6 +503,34 @@ export class GameRenderer {
   }
 
   // ------------------------------------------------------------------------------------------------
+  // Dropped ammo packs
+  // ------------------------------------------------------------------------------------------------
+  /** Shows exactly the packs in the latest snapshot ([id, x, y, z] rows), spinning and bobbing. */
+  syncPickups(list, time) {
+    if (!this.pickupMeshes) this.pickupMeshes = new Map();
+    const seen = new Set();
+    for (const [id, x, y, z] of list) {
+      seen.add(id);
+      let m = this.pickupMeshes.get(id);
+      if (!m) {
+        m = buildAmmoPack();
+        m.position.set(x, y, z);
+        this.scene.add(m);
+        this.pickupMeshes.set(id, m);
+      }
+      m.userData.crate.position.y = 0.32 + Math.sin(time * 2.6 + id) * 0.06;
+      m.userData.crate.rotation.y = time * 1.4 + id;
+      m.userData.ring.material.opacity = 0.35 + 0.2 * Math.sin(time * 4 + id);
+    }
+    for (const [id, m] of this.pickupMeshes) {
+      if (seen.has(id)) continue;
+      this.scene.remove(m);
+      m.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      this.pickupMeshes.delete(id);
+    }
+  }
+
+  // ------------------------------------------------------------------------------------------------
   // Characters
   // ------------------------------------------------------------------------------------------------
   syncCharacter(id, info, pose, dt, labelText, labelColor, markerVisible = false) {
@@ -399,6 +549,11 @@ export class GameRenderer {
     c.setWeapon(pose.weapon);
     c.tick();
     return c.update(pose, dt);
+  }
+
+  characterEmote(id, emote) {
+    const c = this.characters.get(id);
+    if (c) c.playEmote(emote);
   }
 
   removeCharacter(id) {

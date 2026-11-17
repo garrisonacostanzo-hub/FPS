@@ -111,6 +111,12 @@ export class AudioEngine {
   }
 
   /** A bullet passing close by: a sharp crack for supersonic rounds, a whistling whiz for slow ones. */
+  /** Ammo pack picked up: two quick metallic clicks. */
+  pickup() {
+    this.tone('pk1', 1320, 0.05, 0.25, 'square');
+    setTimeout(() => this.tone('pk2', 1760, 0.07, 0.22, 'square'), 70);
+  }
+
   nearMiss(position, supersonic) {
     if (!this.ensure()) return;
     const b = supersonic

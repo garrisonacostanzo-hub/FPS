@@ -7,17 +7,21 @@ import { sanitizeDifficulty } from './difficulty.js';
 import { BotBrain } from './bots.js';
 import { clamp, dist2, dist3, distToSegment, makeRng, rayBox, raySphere } from './math.js';
 import { buildMap, generateCoverPoints } from './map.js';
+import { EMOTE_COOLDOWN, EMOTE_IDS } from './emotes.js';
 import { createMode } from './modes.js';
 import { createMotorState, eyeHeightOf } from './movement.js';
 import { NavGrid } from './nav.js';
 import { NOISE, hitboxesAt, packActor, stepCommand } from './sim.js';
-import { BOT_PRIMARY_POOL, PRIMARY_WEAPONS, WEAPONS, createWeaponState, damageAt, refillWeapons, setLoadout, spreadDirection } from './weapons.js';
+import { WEAPONS, WEAPON_SETS, weaponSet, createWeaponState, damageAt, refillWeapons, setLoadout, spreadDirection } from './weapons.js';
 import { World } from './world.js';
 
 const HISTORY_LEN = Math.ceil(HISTORY_SECONDS * TICK_RATE) + 4;
 const WARMUP = 4;
 const END_SCREEN = 12;
 const WAIT_FOR_PLAYERS = 45;
+const PICKUP_LIFETIME = 30;   // seconds an ammo pack stays on the ground
+const PICKUP_RADIUS = 1.25;   // walk this close to pick it up
+const MAX_PICKUPS = 24;
 
 const mapCache = new Map();
 
@@ -81,6 +85,8 @@ export class Game {
     this.flankers = new Map();
     this.rosterDirty = true;
     this.zones = this.map.zones.map((z) => ({ ...z, owner: TEAM.NONE, progress: 0, contested: false }));
+    this.pickups = [];         // dropped ammo packs { id, x, y, z, ammo: { weaponId: rounds }, expires, name }
+    this.nextPickupId = 1;
     this.mode = createMode(this.config.mode, this);
     this.botNameIndex = Math.floor(this.rng() * BOT_NAMES.length);
     this.startMatch();
@@ -99,6 +105,7 @@ export class Game {
       e.kills = 0; e.deaths = 0; e.score = 0; e.tier = 0; e.streak = 0;
     }
     for (const z of this.zones) { z.owner = TEAM.NONE; z.progress = 0; z.contested = false; }
+    this.pickups.length = 0;
     if (this.mode.managesEnemyBots) this.removeBots(TEAM.B);
     this.rebalanceBots();
     this.respawnAll();
@@ -119,6 +126,14 @@ export class Game {
     this.phaseEnd = this.time + END_SCREEN;
     this.result = result;
     this.event({ type: 'end', team: result.team, winner: result.winner ?? -1, text: result.text });
+    // Good sportsmanship from the bots.
+    for (const e of this.entities.values()) {
+      if (!e.isBot) continue;
+      const won = result.team !== TEAM.NONE ? e.team === result.team : result.winner === e.id;
+      const roll = this.rng();
+      if (roll < 0.3) this.emote(e, won ? 'cheer' : 'gg');
+      else if (roll < 0.5) this.botChat(e, ['gg', 'gg wp', 'gg everyone', 'good game'][Math.floor(this.rng() * 4)]);
+    }
   }
 
   // ==============================================================================================
@@ -127,14 +142,15 @@ export class Game {
   createEntity({ name, isBot, team, loadout, clientId, cosmetics }) {
     const id = this.nextId++;
     const look = isBot ? botCosmetics(this.rng) : cosmetics || {};
-    const primary = loadout && PRIMARY_WEAPONS.includes(loadout[0]) ? loadout[0] : 'rifle';
+    // A weapon set id (players) or a random set (bots): everyone carries the set's four guns.
+    const guns = weaponSet(isBot ? WEAPON_SETS[Math.floor(this.rng() * WEAPON_SETS.length)].id : loadout).guns;
     const e = {
       id, name, isBot, clientId,
       camo: sanitizeCamo(look.camo), outfit: sanitizeOutfit(look.outfit),
       team: TEAM.NONE,
       motor: createMotorState(0, 0, 0, 0),
-      ws: createWeaponState([primary, 'pistol']),
-      loadoutPref: [primary, 'pistol'],
+      ws: createWeaponState(guns),
+      loadoutPref: guns.slice(),
       clock: 0, aim01: 0, prevFire: false, sprintLock: 0,
       alive: false, hp: PLAYER.maxHealth, maxHp: PLAYER.maxHealth,
       respawnAt: this.time + 0.5, protectUntil: 0, lastDamage: -99, lastFire: -99,
@@ -174,8 +190,7 @@ export class Game {
 
   spawnBot(team, difficulty, options = {}) {
     const name = BOT_NAMES[this.botNameIndex++ % BOT_NAMES.length];
-    const primary = BOT_PRIMARY_POOL[Math.floor(this.rng() * BOT_PRIMARY_POOL.length)];
-    const e = this.createEntity({ name: (options.horde ? 'X-' : 'BOT ') + name, isBot: true, team, loadout: [primary, 'pistol'] });
+    const e = this.createEntity({ name: (options.horde ? 'X-' : 'BOT ') + name, isBot: true, team });
     if (difficulty !== undefined && difficulty !== null) {
       // Numeric (adaptive) levels: each bot varies a little around the target so they don't all play alike.
       const level = typeof difficulty === 'number' ? Math.max(0, Math.min(4, difficulty + (this.rng() - 0.5) * 0.5)) : difficulty;
@@ -252,9 +267,10 @@ export class Game {
     refillWeapons(e.ws);
   }
 
-  setPreferredPrimary(e, primary) {
-    if (!PRIMARY_WEAPONS.includes(primary)) return;
-    e.loadoutPref = [primary, 'pistol'];
+  /** Weapon set for the next respawn. */
+  setPreferredSet(e, setId) {
+    if (!WEAPON_SETS.some((s) => s.id === setId)) return;
+    e.loadoutPref = weaponSet(setId).guns.slice();
   }
 
   // ==============================================================================================
@@ -392,6 +408,7 @@ export class Game {
     }
 
     this.stepBullets(dt);
+    if (this.phase !== 'ended') this.updatePickups();
     if (this.phase !== 'ended') this.mode.update(dt);
     // Squad and duel matches do not loop: the squad leader / challenger queues the next one from the end screen.
     if (this.phase === 'ended' && this.time >= this.phaseEnd && !this.config.party && !this.config.duel) {
@@ -581,6 +598,82 @@ export class Game {
     if (victim.hp <= 0) this.kill(victim, attacker, weaponId, headshot);
   }
 
+  // ==============================================================================================
+  // Ammo drops: whoever dies leaves all the ammo they were carrying (magazines + reserves) in a pack. The first
+  // living player to walk over it takes it: rounds for a gun they also carry go straight in, and their other guns
+  // get the same share of a full load as the pack held. Reserves never go above a fresh loadout's.
+  // ==============================================================================================
+  dropAmmo(victim) {
+    const ammo = {};
+    let total = 0;
+    for (const s of victim.ws.slots) {
+      const n = s.mag + s.reserve;
+      if (n > 0) { ammo[s.id] = (ammo[s.id] || 0) + n; total += n; }
+    }
+    if (!total) return;
+    const m = victim.motor;
+    const y = this.world.surfaceHeight(m.x, m.z, m.y + 0.3);
+    this.pickups.push({ id: this.nextPickupId++, x: m.x, y, z: m.z, ammo, expires: this.time + PICKUP_LIFETIME, name: victim.name });
+    if (this.pickups.length > MAX_PICKUPS) this.pickups.shift();
+  }
+
+  /** Adds a pack's ammo to an entity's reserves. Returns the number of rounds taken. */
+  giveAmmo(e, pack) {
+    let shares = 0, count = 0;
+    for (const [id, n] of Object.entries(pack.ammo)) {
+      const w = WEAPONS[id];
+      if (w) { shares += Math.min(1, n / (w.mag + w.reserve)); count++; }
+    }
+    const share = count ? shares / count : 0;
+    let gained = 0;
+    for (const s of e.ws.slots) {
+      const w = WEAPONS[s.id];
+      const room = w.reserve - s.reserve;
+      if (room <= 0) continue;
+      const add = pack.ammo[s.id] !== undefined ? pack.ammo[s.id] : Math.round(share * (w.mag + w.reserve));
+      const take = Math.min(room, add);
+      if (take > 0) { s.reserve += take; gained += take; }
+    }
+    return gained;
+  }
+
+  updatePickups() {
+    const r2max = PICKUP_RADIUS * PICKUP_RADIUS;
+    for (let i = this.pickups.length - 1; i >= 0; i--) {
+      const p = this.pickups[i];
+      if (this.time >= p.expires) { this.pickups.splice(i, 1); continue; }
+      for (const e of this.entities.values()) {
+        if (!e.alive) continue;
+        const dx = e.motor.x - p.x, dz = e.motor.z - p.z;
+        if (dx * dx + dz * dz > r2max || Math.abs(e.motor.y - p.y) > 1.6) continue;
+        const gained = this.giveAmmo(e, p);
+        if (gained <= 0) continue; // already full: leave it for someone else
+        this.pickups.splice(i, 1);
+        if (!e.isBot) this.eventTo(e, { type: 'ammo', n: gained, from: p.name });
+        this.event({ type: 'pkup', x: r2(p.x), y: r2(p.y), z: r2(p.z) });
+        break;
+      }
+    }
+  }
+
+  // ==============================================================================================
+  // Emotes and bot banter
+  // ==============================================================================================
+  /** Plays an emote for an entity (validated and rate-limited); everyone sees it. */
+  emote(e, id) {
+    if (!e || !e.alive || !EMOTE_IDS.includes(id)) return false;
+    if (this.time - (e.lastEmote ?? -9) < EMOTE_COOLDOWN) return false;
+    e.lastEmote = this.time;
+    this.event({ type: 'emote', id: e.id, e: id });
+    return true;
+  }
+
+  botChat(bot, text) {
+    if (this.time - (bot.lastChat ?? -9) < 4) return;
+    bot.lastChat = this.time;
+    this.event({ type: 'chat', id: bot.id, text, tm: 0 });
+  }
+
   kill(victim, attacker, weaponId, headshot) {
     if (!victim.alive) return;
     victim.alive = false;
@@ -594,6 +687,10 @@ export class Game {
       attacker.score += headshot ? 150 : 100;
     }
     this.mode.onKill(valid ? attacker : null, victim, { weaponId, headshot });
+    this.dropAmmo(victim);
+    // Bots react now and then, so emotes and chat show up in offline matches too.
+    if (valid && attacker.isBot && this.rng() < 0.1) this.emote(attacker, ['cool', 'flex', 'lol'][Math.floor(this.rng() * 3)]);
+    if (valid && victim.isBot && headshot && this.rng() < 0.12) this.botChat(victim, ['nice shot', 'what a shot', 'ok that was clean'][Math.floor(this.rng() * 3)]);
     victim.respawnAt = this.mode.canRespawn(victim) ? this.time + this.mode.respawnDelay(victim) : Infinity;
     if (this.coverOwners.size) for (const [index, owner] of this.coverOwners) if (owner === victim) this.coverOwners.delete(index);
     this.flankers.delete(victim.id);
@@ -768,6 +865,7 @@ export class Game {
       ents.push([e.id, r2(m.x), r2(m.y), r2(m.z), r3(m.yaw), r3(m.pitch), r2(m.crouch), flags, slot ? slot.id : 'pistol', Math.ceil(e.hp)]);
     }
     const snap = { type: 'snap', t: r3(this.time), e: ents, m: this.hudState() };
+    if (this.pickups.length) snap.pk = this.pickups.map((p) => [p.id, r2(p.x), r2(p.y), r2(p.z)]);
     if (forEntity) {
       snap.ack = forEntity.lastSeq;
       snap.you = {

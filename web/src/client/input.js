@@ -11,14 +11,14 @@ export class Input {
     this.mouseButtons = 0;
     this.lookX = 0;
     this.lookY = 0;
-    this.latched = { jump: false, reload: false, slot: -1, cycle: 0, firePressed: false, scoreboard: false, chat: false };
+    this.latched = { jump: false, reload: false, slot: -1, cycle: 0, firePressed: false, scoreboard: false, chat: false, teamChat: false, emote: false };
     this.crouchToggled = false;
     this.aimToggled = false;
     this.enabled = true;
     this.locked = document.pointerLockElement === canvas; // the menu may already have captured the mouse
     this.fallback = false; // playing without pointer lock
     this.touchMode = false; // on-screen touch controls drive the game (see touch.js)
-    this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, aimHold: 0, crouch: false, scoreboard: false, lookX: 0, lookY: 0 };
+    this.touch = { mx: 0, mz: 0, sprint: false, fire: 0, autoFire: false, aim: false, aimHold: 0, crouch: false, scoreboard: false, lookX: 0, lookY: 0, talk: false };
     this.onLockChange = null;
 
     this._keydown = (e) => this.handleKey(e, true);
@@ -146,10 +146,14 @@ export class Input {
         if (code === 'KeyR') this.latched.reload = true;
         if (code === 'Digit1') this.latched.slot = 0;
         if (code === 'Digit2') this.latched.slot = 1;
+        if (code === 'Digit3') this.latched.slot = 2;
+        if (code === 'Digit4') this.latched.slot = 3;
         if (code === 'KeyQ') this.latched.cycle = -1;
         if (code === 'KeyE') this.latched.cycle = 1;
         if ((code === 'ControlLeft' || code === 'KeyC') && settings.toggleCrouch) this.crouchToggled = !this.crouchToggled;
         if (code === 'KeyT' || code === 'Enter') this.latched.chat = true;
+        if (code === 'KeyY') this.latched.teamChat = true;
+        if (code === 'KeyB') this.latched.emote = true;
       }
       this.keys.add(code);
       if (['Space', 'ControlLeft', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(code)) e.preventDefault();
@@ -168,6 +172,8 @@ export class Input {
   get crouch() { return this.touch.crouch || (settings.toggleCrouch ? this.crouchToggled : (this.keys.has('ControlLeft') || this.keys.has('KeyC'))); }
   get fire() { return (this.mouseButtons & 1) !== 0 || this.touch.fire > 0 || this.touch.autoFire; }
   get aim() { return this.touch.aim || this.touch.aimHold > 0 || (settings.toggleAim ? this.aimToggled : (this.mouseButtons & 4) !== 0); }
+  get emoteHeld() { return this.keys.has('KeyB'); }
+  get talkHeld() { return this.keys.has('KeyV') || this.touch.talk; }
   get scoreboard() { return this.keys.has('Tab') || this.touch.scoreboard; }
 
   consumeLook() {
