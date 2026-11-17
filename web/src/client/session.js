@@ -5,6 +5,8 @@ import { BTN, TEAM } from '../shared/constants.js';
 import { buildMap } from '../shared/map.js';
 import { DEG, clamp, dirFromAngles, lerp, lerpAngle, rayBox, raySphere } from '../shared/math.js';
 import { EMOTES, EMOTE_COOLDOWN, emoteById } from '../shared/emotes.js';
+import { DANCES, danceAt, danceById } from '../shared/dances.js';
+import { danceMusic } from './emotemusic.js';
 import { VoiceChat } from './voice.js';
 import { abilityById } from '../shared/abilities.js';
 import { MODE_LIST } from '../shared/modes.js';
@@ -46,7 +48,9 @@ export class ClientSession {
     // What guests are told when this player (as host) closes the room.
     this.closeReason = squad && squad.leader ? 'Your squad leader went back to the lobby.' : undefined;
     this.sawOpponent = false;
-    this.wheel = { open: false, touch: false, x: 0, y: 0, sel: -1 };
+    this.wheel = { open: false, touch: false, page: 'emotes', key: 'KeyB', x: 0, y: 0, sel: -1 };
+    this.dance = null;
+    this.hostDance = 0;
     this.audio = audio;
     this.onExit = onExit;
     this.myId = welcome.id;
@@ -94,12 +98,13 @@ export class ClientSession {
       onLoadout: (patch) => this.transport.send({ type: 'loadout', ...patch }),
       onScopeMode: () => this.input.cancelAim(),
       onEmote: (id) => this.closeEmoteWheel(id),
+      onWheelPage: (page) => this.setWheelPage(page),
       onVoiceMute: (id) => { if (this.voice) this.voice.toggleMute(id); },
     });
     this.touchUI = new TouchControls(hudRoot, this.input, {
       onPause: () => { if (!this.paused) this.input.releaseLock(); },
       onScoreboard: () => {},
-      onEmote: () => (this.wheel.open ? this.closeEmoteWheel(null) : this.openEmoteWheel(true)),
+      onEmote: () => (this.wheel.open ? this.closeEmoteWheel(null) : this.openEmoteWheel(true, 'emotes')),
       onChat: () => this.openChat(false),
     });
     this.touchUI.setEnabled(touchControlsWanted());
@@ -264,7 +269,7 @@ export class ClientSession {
     this.grenadeList = snap.gr || [];
     this.smokeList = snap.sm || [];
     this.revealedIds = snap.rv ? new Set(snap.rv) : null;
-    if (snap.you) this.cloakLeft = snap.you.ck || 0;
+    if (snap.you) { this.cloakLeft = snap.you.ck || 0; this.hostDance = snap.you.dn || 0; }
     if (snap.m.ph !== this.phase) {
       this.phase = snap.m.ph;
       if (this.phase === 'live' && this.ended) { this.ended = false; this.hud.hideEnd(); }
@@ -405,6 +410,8 @@ export class ClientSession {
         if (!em) return;
         if (ev.id === this.myId) this.hud.selfEmote(em);
         else this.renderer.characterEmote(ev.id, em);
+        const who = this.roster.get(ev.id);
+        if (who) this.hud.chatMessage(who.name, `${em.icon} ${em.label}`, who.team, false, who.isBot, true);
         return;
       }
       case 'abl': {
@@ -560,6 +567,8 @@ export class ClientSession {
     this.input.dispose();
     this.unsubscribeSettings();
     if (this.voice) { this.voice.dispose(); this.voice = null; }
+    if (this.dance) this.stopDance(false);
+    if (this.remoteDanceMusic) { for (const m of this.remoteDanceMusic.values()) m.handle.stop(); this.remoteDanceMusic.clear(); }
     this.hud.destroy();
     this.renderer.dispose();
     this.transport.close(this.closeReason);
@@ -592,10 +601,12 @@ export class ClientSession {
     this.updateSway(dt);
     this.touchUI.update({ autoFiring: this.crosshairTarget === 2 && this.autoFireAllowed(), ability: abilityById(this.actor.ability), cooldown: Math.max(0, (this.actor.abilityReady || 0) - this.actor.clock) });
     // T: chat to everyone · Y: team chat · B: emote wheel.
-    const wantChat = this.input.consume('chat'), wantTeam = this.input.consume('teamChat'), wantWheel = this.input.consume('emote');
+    const wantChat = this.input.consume('chat'), wantTeam = this.input.consume('teamChat');
+    const wantWheel = this.input.consume('emote'), wantQuick = this.input.consume('quick');
     if (!this.paused && !this.wheel.open && (wantChat || wantTeam)) this.openChat(wantTeam && this.teams);
-    if (!this.paused && wantWheel && !this.wheel.open && !this.hud.chatOpen) this.openEmoteWheel(false);
+    if (!this.paused && (wantWheel || wantQuick) && !this.wheel.open && !this.hud.chatOpen) this.openEmoteWheel(false, wantQuick ? 'quick' : 'emotes');
     this.updateEmoteWheel();
+    this.checkDanceCancel();
     this.updateVoice(dt);
 
     // Fixed-rate command generation (60 Hz) with prediction.
@@ -697,8 +708,8 @@ export class ClientSession {
       dt: CMD_DT,
       mx: active ? input.moveX : 0,
       mz: active ? input.moveZ : 0,
-      yaw: this.viewYaw + this.recoilYaw + this.sway.yaw,
-      pitch: clamp(this.viewPitch + this.recoilPitch + this.sway.pitch, -1.5, 1.5),
+      yaw: this.dance ? this.dance.yaw : this.viewYaw + this.recoilYaw + this.sway.yaw,
+      pitch: this.dance ? this.dance.pitch : clamp(this.viewPitch + this.recoilPitch + this.sway.pitch, -1.5, 1.5),
       b: active && !this.wheel.open ? input.buildButtons() : 0,
       sw,
       r: active ? input.consume('reload') : false,
@@ -756,35 +767,106 @@ export class ClientSession {
     this.hud.el.chatInput.focus();
   }
 
-  openEmoteWheel(touch) {
+  /** The wheel has two pages: EMOTES (dances, B) and QUICK CHAT (Z). */
+  wheelItems(page) { return page === 'quick' ? EMOTES : DANCES; }
+
+  openEmoteWheel(touch, page = 'emotes') {
     if (!this.actor.alive || this.ended) return;
-    this.wheel = { open: true, touch, x: 0, y: 0, sel: -1 };
-    this.hud.showEmoteWheel(true, touch);
+    this.wheel = { open: true, touch, page, key: page === 'quick' ? 'KeyZ' : 'KeyB', x: 0, y: 0, sel: -1 };
+    this.input.consume('cycle');
+    this.hud.showEmoteWheel(true, touch, page);
   }
 
-  /** Mouse picks the wedge it points at; releasing B (or clicking) plays it. */
+  setWheelPage(page) {
+    if (!this.wheel.open || this.wheel.page === page) return;
+    this.wheel.page = page;
+    this.wheel.sel = -1;
+    this.hud.showEmoteWheel(true, this.wheel.touch, page);
+  }
+
+  /** Mouse picks the wedge it points at; releasing the key (or clicking) plays it. Mouse wheel / Q / E flip pages. */
   updateEmoteWheel() {
     const w = this.wheel;
     if (!w.open) return;
     if (!this.actor.alive || this.paused || this.ended) { this.closeEmoteWheel(null); return; }
+    if (this.input.consume('cycle')) this.setWheelPage(w.page === 'quick' ? 'emotes' : 'quick');
     if (w.touch) return;
+    const items = this.wheelItems(w.page);
     const len = Math.hypot(w.x, w.y);
-    const sel = len > 35 ? Math.round(((Math.atan2(w.x, -w.y) / (Math.PI * 2)) * EMOTES.length + EMOTES.length)) % EMOTES.length : -1;
-    if (sel !== w.sel) { w.sel = sel; this.hud.setEmoteSelection(sel); }
-    if (this.input.consume('firePressed')) { this.closeEmoteWheel(sel >= 0 ? EMOTES[sel].id : null); return; }
-    if (!this.input.emoteHeld) this.closeEmoteWheel(sel >= 0 ? EMOTES[sel].id : null);
+    const sel = len > 35 ? Math.round(((Math.atan2(w.x, -w.y) / (Math.PI * 2)) * items.length + items.length)) % items.length : -1;
+    if (sel !== w.sel) { w.sel = sel; this.hud.setEmoteSelection(sel, w.page); }
+    if (this.input.consume('firePressed')) { this.closeEmoteWheel(sel >= 0 ? items[sel].id : null); return; }
+    if (!this.input.keys.has(w.key)) this.closeEmoteWheel(sel >= 0 ? items[sel].id : null);
   }
 
   closeEmoteWheel(id) {
-    const wasTouch = this.wheel.touch;
-    this.wheel = { open: false, touch: false, x: 0, y: 0, sel: -1 };
+    const { touch: wasTouch, page } = this.wheel;
+    this.wheel = { open: false, touch: false, page: 'emotes', key: 'KeyB', x: 0, y: 0, sel: -1 };
     this.hud.showEmoteWheel(false);
     if (!id) return;
+    if (wasTouch) this.input.touch.fire = 0;
+    if (page === 'emotes') { this.startDance(id); return; }
     const now = performance.now();
     if (now - (this.lastEmoteSent || 0) < EMOTE_COOLDOWN * 1000) return;
     this.lastEmoteSent = now;
     this.transport.send({ type: 'emote', e: id });
-    if (wasTouch) this.input.touch.fire = 0;
+  }
+
+  // ==============================================================================================
+  // Emote dances: third-person camera you can orbit with the mouse; moving, jumping, shooting, aiming, crouching,
+  // reloading, switching weapons or using an ability stops it.
+  // ==============================================================================================
+  startDance(id) {
+    const d = danceById(id);
+    if (!d || !this.actor.alive || this.ended) return;
+    if (this.dance) this.stopDance(false);
+    this.input.cancelAim();
+    this.dance = { id, start: performance.now(), yaw: this.viewYaw, pitch: this.viewPitch, name: d.name };
+    // Start the camera in front of you, a little to the side, looking back at your character.
+    this.viewYaw = this.dance.yaw + Math.PI * 0.82;
+    this.viewPitch = -0.12;
+    this.transport.send({ type: 'dance', d: id });
+    if (settings.emoteMusic && this.audio.ensure()) this.danceMusicSelf = this.audio.playLoop(danceMusic(this.audio.ctx, id), { volume: 0.45 });
+    this.hud.setDanceHint(d, this.touchUI.enabled);
+  }
+
+  stopDance(send) {
+    if (!this.dance) return;
+    this.viewYaw = this.dance.yaw;
+    this.viewPitch = this.dance.pitch;
+    this.snapYaw = false;
+    this.dance = null;
+    if (this.danceMusicSelf) { this.danceMusicSelf.stop(); this.danceMusicSelf = null; }
+    this.renderer.syncSelf(null);
+    this.hud.setDanceHint(null);
+    if (send) this.transport.send({ type: 'dance', d: null });
+  }
+
+  /** Called every frame before commands are built: any action input ends your dance (the action still happens). */
+  checkDanceCancel() {
+    if (!this.dance) return;
+    const i = this.input;
+    const acted = Math.abs(i.moveX) > 0.1 || Math.abs(i.moveZ) > 0.1 || i.fire || i.latched.firePressed || i.latched.jump || i.aim
+      || i.abilityHeld || i.crouch || i.latched.slot >= 0 || i.latched.cycle !== 0 || i.latched.reload;
+    const hostStopped = this.hostDance === 0 && performance.now() - this.dance.start > 800;
+    if (acted || !this.actor.alive || this.ended || hostStopped) this.stopDance(!hostStopped);
+  }
+
+  /** Music for other players' dances (positional), started and stopped as their snapshots change. */
+  syncDanceMusic(dancers) {
+    if (!this.remoteDanceMusic) this.remoteDanceMusic = new Map();
+    for (const [id, m] of this.remoteDanceMusic) {
+      const d = dancers.get(id);
+      if (!d || d.id !== m.id || !settings.emoteMusic) { m.handle.stop(); this.remoteDanceMusic.delete(id); }
+    }
+    if (!settings.emoteMusic) return;
+    for (const [id, d] of dancers) {
+      const m = this.remoteDanceMusic.get(id);
+      if (m) { m.handle.setPosition(d.at); continue; }
+      if (!this.audio.ensure()) return;
+      const handle = this.audio.playLoop(danceMusic(this.audio.ctx, d.id), { volume: 0.5, position: d.at });
+      if (handle) this.remoteDanceMusic.set(id, { id: d.id, handle });
+    }
   }
 
   /** Is this enemy visible from the camera (not behind a wall)? Re-checked about 8 times a second per enemy. */
@@ -1002,6 +1084,7 @@ export class ClientSession {
     const span = b.t - a.t;
     const f = span > 1e-4 ? clamp((renderTime - a.t) / span, 0, 1) : 1;
     const live = new Set();
+    const dancers = new Map();
     for (const [id, eb] of b.ents) {
       const ea = a.ents.get(id) || eb;
       const info = this.roster.get(id);
@@ -1012,7 +1095,9 @@ export class ClientSession {
         yaw: lerpAngle(ea[4], eb[4], f), pitch: lerp(ea[5], eb[5], f), crouch: lerp(ea[6], eb[6], f),
         alive: (eb[7] & 1) === 1, sprint: (eb[7] & 2) !== 0, weapon: eb[8], hp: eb[9],
         cloak: (eb[7] & 32) !== 0, revealed: !!(this.revealedIds && this.revealedIds.has(id)),
+        dance: danceAt(eb[10] || 0),
       };
+      if (pose.dance && pose.alive) dancers.set(id, { id: pose.dance, at: { x: pose.x, y: pose.y + 1, z: pose.z } });
       this.renderPoses.set(id, pose);
       const ally = this.palette.isAlly(id, info.team);
       const color = this.palette.entity(id, info.team);
@@ -1029,6 +1114,7 @@ export class ClientSession {
       }
     }
     this.renderer.pruneCharacters(live);
+    this.syncDanceMusic(dancers);
   }
 
   // ==============================================================================================
@@ -1061,7 +1147,21 @@ export class ClientSession {
     const shakeX = (Math.random() - 0.5) * this.shake * 0.02, shakeY = (Math.random() - 0.5) * this.shake * 0.02;
     cam.rotation.order = 'YXZ';
 
-    if (this.actor.alive) {
+    if (this.actor.alive && this.dance) {
+      // Third-person orbit around your dancing character (mouse turns the camera, not the character).
+      const tx = px, ty = py + 1.15, tz = pz;
+      const dir = dirFromAngles(this.viewYaw, clamp(this.viewPitch, -1.1, 0.6));
+      let dist = 3.4;
+      const hit = this.world.raycast(tx, ty, tz, -dir.x, -dir.y, -dir.z, dist);
+      if (hit) dist = Math.max(0.6, hit.t - 0.25);
+      cam.position.set(tx - dir.x * dist, Math.max(0.3, ty - dir.y * dist), tz - dir.z * dist);
+      cam.lookAt(tx, ty - 0.1, tz);
+      this.renderer.syncSelf({
+        pose: { x: px, y: py, z: pz, yaw: this.dance.yaw, pitch: 0, crouch: 0, alive: true, weapon: w.id },
+        dance: this.dance.id, dt,
+        info: { team: this.myTeam, color: this.palette.colors.ally, ally: true, outline: false, outfit: profile.equipped.outfit, camo: profile.equipped.camo, weapon: w.id },
+      });
+    } else if (this.actor.alive) {
       const bob = m.grounded && settings.cameraBob ? Math.sin(t * 0.012 * (1 + speed * 0.15)) * Math.min(1, speed / 7) * 0.03 * (1 - this.actor.aim01 * 0.85) : 0;
       cam.position.set(px, py + eyeHeightOf(m) + Math.abs(bob), pz);
       cam.rotation.set(clamp(this.viewPitch + this.recoilPitch + this.sway.pitch, -1.5, 1.5) + shakeY, this.viewYaw + this.recoilYaw + this.sway.yaw + shakeX, 0);
@@ -1079,7 +1179,7 @@ export class ClientSession {
     this.renderer.vmCamera.fov = 58;
     this.renderer.updateViewModel(dt, {
       lookDX: this.lookDX, lookDY: this.lookDY, speed: m.grounded ? speed : 0, sprinting: m.sprinting && speed > 1,
-      aim: this.actor.aim01, reloading: this.actor.ws.reloading, alive: this.actor.alive && !this.ended,
+      aim: this.actor.aim01, reloading: this.actor.ws.reloading, alive: this.actor.alive && !this.ended && !this.dance,
     });
     const forward = dirFromAngles(this.viewYaw, this.viewPitch);
     this.audio.setListener(cam.position, forward);
@@ -1093,7 +1193,7 @@ export class ClientSession {
     const spread = currentSpread(ws, speed01, m.grounded, m.crouch > 0.5, this.actor.aim01);
     const cam = this.renderer.camera;
     const px = Math.tan((spread * 0.5) * DEG) / Math.tan((cam.fov * 0.5) * DEG) * (window.innerHeight / 2);
-    const visible = this.actor.alive && !(m.sprinting && Math.hypot(m.vx, m.vz) > 1) && !ws.reloading;
+    const visible = this.actor.alive && !this.dance && !(m.sprinting && Math.hypot(m.vx, m.vz) > 1) && !ws.reloading;
     this.hud.setCrosshair(px, w.id === 'sniper' ? Math.max(this.actor.aim01, 0) : this.actor.aim01, visible);
     this.hud.setAmmo(ws);
     this.hud.updateDeathTimer();

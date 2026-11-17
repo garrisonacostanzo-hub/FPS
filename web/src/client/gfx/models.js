@@ -293,7 +293,7 @@ export function shade(color, k) {
 /**
  * Operator model.
  * @param {object} opts { color (team colour), outfit id, outline (bool), simple (bool, fewer parts), visorOverride }
- * Returns { root, body, legL, legR, armPivot, headPivot, gunSocket }.
+ * Returns { root, body, legL, legR, kneeL, kneeR, armPivot, headPivot, gunSocket, danceArms, shoulderL/R, elbowL/R }.
  */
 export function buildOperator(opts) {
   const look = outfitById(opts.outfit).look;
@@ -310,19 +310,23 @@ export function buildOperator(opts) {
   root.add(body);
   const bulk = look.bulky ? 1.12 : 1;
 
-  // Legs pivot at the hips.
-  const legs = [];
+  // Legs pivot at the hips, shins at the knees (knees only bend for emotes).
+  const legs = [], knees = [];
   for (const side of [-1, 1]) {
     const leg = new THREE.Group();
     leg.position.set(side * 0.11, 0.9, 0);
     body.add(leg);
     outlined.push(add(leg, capsule(0.085 * bulk, 0.3), teamDark, 0, -0.22, 0));
-    outlined.push(add(leg, capsule(0.075 * bulk, 0.3), teamDark, 0, -0.6, 0.01));
+    const knee = new THREE.Group();
+    knee.position.set(0, -0.42, 0);
+    leg.add(knee);
+    outlined.push(add(knee, capsule(0.075 * bulk, 0.3), teamDark, 0, -0.18, 0.01));
     if (!opts.simple) {
-      add(leg, rbox(0.12, 0.12, 0.08), look.pads ? mat(look.pads) : dark, 0, -0.42, -0.08);
-      add(leg, rbox(0.13, 0.1, 0.25, 0.3), dark, 0, -0.85, -0.03);
+      add(knee, rbox(0.12, 0.12, 0.08), look.pads ? mat(look.pads) : dark, 0, 0, -0.08);
+      add(knee, rbox(0.13, 0.1, 0.25, 0.3), dark, 0, -0.43, -0.03);
     }
     legs.push(leg);
+    knees.push(knee);
   }
   // Hips, torso (team colour), plates (outfit), belt, backpack.
   outlined.push(add(body, rbox(0.36 * bulk, 0.2, 0.22, 0.3), teamDark, 0, 0.94, 0));
@@ -402,11 +406,33 @@ export function buildOperator(opts) {
   gunSocket.position.set(0.1, -0.02, -0.42);
   armPivot.add(gunSocket);
 
+  // Free arms for emotes (dances): shoulder -> elbow pivots, hidden unless dancing (the gun arms hide instead).
+  const danceArms = new THREE.Group();
+  danceArms.visible = false;
+  body.add(danceArms);
+  const shoulders = [], elbows = [];
+  for (const side of [-1, 1]) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.27 * bulk, 1.4, 0);
+    danceArms.add(shoulder);
+    outlined.push(limb(shoulder, v3(0, 0, 0), v3(0, -0.27, 0), 0.065 * bulk, team));
+    const elbow = new THREE.Group();
+    elbow.position.set(0, -0.27, 0);
+    shoulder.add(elbow);
+    outlined.push(limb(elbow, v3(0, 0, 0), v3(0, -0.25, 0), 0.056, team));
+    add(elbow, sphere(0.05), dark, 0, -0.29, 0);
+    shoulders.push(shoulder);
+    elbows.push(elbow);
+  }
+
   // Only the big body parts cast shadows (small pouches, gloves and visors would cost draw calls for nothing).
   root.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   for (const m of outlined) m.castShadow = true;
   if (opts.outline) for (const m of outlined) addOutline(m, opts.color);
-  return { root, body, legL: legs[0], legR: legs[1], armPivot, headPivot, gunSocket };
+  return {
+    root, body, legL: legs[0], legR: legs[1], kneeL: knees[0], kneeR: knees[1], armPivot, headPivot, gunSocket,
+    danceArms, shoulderL: shoulders[0], shoulderR: shoulders[1], elbowL: elbows[0], elbowR: elbows[1],
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------------------

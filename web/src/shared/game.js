@@ -1,6 +1,6 @@
 // Authoritative game simulation. Runs in the host player's browser for online play and in your own tab for offline
 // play (same code path), so offline and online behave identically.
-import { BOT_NAMES, HISTORY_SECONDS, MAX_REWIND, PLAYER, TEAM, TEAM_NAMES, TICK_RATE } from './constants.js';
+import { BTN, BOT_NAMES, HISTORY_SECONDS, MAX_REWIND, PLAYER, TEAM, TEAM_NAMES, TICK_RATE } from './constants.js';
 import { BULLET_STEP, MATERIAL_IDS, accelerate, createBullet, exitDistance, penetrationCost } from './ballistics.js';
 import { botCosmetics, sanitizeCamo, sanitizeOutfit } from './cosmetics.js';
 import { sanitizeDifficulty } from './difficulty.js';
@@ -9,6 +9,7 @@ import { clamp, dirFromAngles, dist2, dist3, distToSegment, makeRng, rayBox, ray
 import { buildMap, generateCoverPoints } from './map.js';
 import { ABILITIES, ABILITY_IDS, CLOAK, GRENADE, PULSE, STIM_HEAL, abilityById } from './abilities.js';
 import { EMOTE_COOLDOWN, EMOTE_IDS } from './emotes.js';
+import { DANCE_IDS, danceIndex } from './dances.js';
 import { createMode } from './modes.js';
 import { createMotorState, eyeHeightOf } from './movement.js';
 import { NavGrid } from './nav.js';
@@ -139,7 +140,8 @@ export class Game {
       if (!e.isBot) continue;
       const won = result.team !== TEAM.NONE ? e.team === result.team : result.winner === e.id;
       const roll = this.rng();
-      if (roll < 0.3) this.emote(e, won ? 'cheer' : 'gg');
+      if (won && roll < 0.55) this.startDance(e, DANCE_IDS[Math.floor(this.rng() * DANCE_IDS.length)]);
+      else if (roll < 0.3) this.emote(e, won ? 'cheer' : 'gg');
       else if (roll < 0.5) this.botChat(e, ['gg', 'gg wp', 'gg everyone', 'good game'][Math.floor(this.rng() * 4)]);
     }
   }
@@ -162,6 +164,7 @@ export class Game {
       // Special ability (players pick one; bots get a random one).
       ability: isBot ? ABILITIES[Math.floor(this.rng() * ABILITIES.length)].id : abilityById(ability).id,
       abilityReady: 0, prevAbility: false, dashEnd: 0, dashX: 0, dashZ: 0, cloakUntil: 0,
+      dance: null, // { id, start } while doing an emote dance
       clock: 0, aim01: 0, prevFire: false, sprintLock: 0,
       alive: false, hp: PLAYER.maxHealth, maxHp: PLAYER.maxHealth,
       respawnAt: this.time + 0.5, protectUntil: 0, lastDamage: -99, lastFire: -99,
@@ -338,6 +341,7 @@ export class Game {
     e.abilityReady = e.clock; // abilities are ready when you spawn
     e.dashEnd = 0;
     e.cloakUntil = 0;
+    e.dance = null;
     if (e.brain) e.brain.reset();
     if (!e.isBot) this.eventTo(e, { type: 'spawn' });
   }
@@ -383,6 +387,11 @@ export class Game {
 
   processCommand(e, cmd) {
     e.currentCmd = cmd;
+    // Moving, jumping, crouching, shooting, aiming, reloading, switching or using an ability ends a dance.
+    if (e.dance) {
+      const b = cmd.b | 0;
+      if (Math.abs(cmd.mx || 0) > 0.1 || Math.abs(cmd.mz || 0) > 0.1 || (b & (BTN.FIRE | BTN.JUMP | BTN.AIM | BTN.ABILITY | BTN.CROUCH)) || cmd.sw >= 0 || cmd.r) e.dance = null;
+    }
     stepCommand(e, cmd, this.world, this.makeHooks());
     e.lastSeq = cmd.s;
   }
@@ -805,6 +814,19 @@ export class Game {
     return true;
   }
 
+  /** Emote dance: validated and rate-limited; shown to everyone through snapshots. */
+  startDance(e, id) {
+    if (!e || !e.alive || !DANCE_IDS.includes(id)) return false;
+    if (this.time - (e.lastDance ?? -9) < 0.8) return false;
+    e.lastDance = this.time;
+    e.dance = { id, start: this.time };
+    return true;
+  }
+
+  stopDance(e) {
+    if (e) e.dance = null;
+  }
+
   botChat(bot, text) {
     if (this.time - (bot.lastChat ?? -9) < 4) return;
     bot.lastChat = this.time;
@@ -825,8 +847,12 @@ export class Game {
     }
     this.mode.onKill(valid ? attacker : null, victim, { weaponId, headshot });
     this.dropAmmo(victim);
-    // Bots react now and then, so emotes and chat show up in offline matches too.
+    victim.dance = null;
+    // Bots react now and then, so quick chat, emotes and chat show up in offline matches too.
     if (valid && attacker.isBot && this.rng() < 0.1) this.emote(attacker, ['cool', 'flex', 'lol'][Math.floor(this.rng() * 3)]);
+    else if (valid && attacker.isBot && this.rng() < 0.05 && attacker.brain && !attacker.brain.targetVisible) {
+      if (this.startDance(attacker, DANCE_IDS[Math.floor(this.rng() * DANCE_IDS.length)])) attacker.brain.danceUntil = this.time + 3 + this.rng() * 2;
+    }
     if (valid && victim.isBot && headshot && this.rng() < 0.12) this.botChat(victim, ['nice shot', 'what a shot', 'ok that was clean'][Math.floor(this.rng() * 3)]);
     victim.respawnAt = this.mode.canRespawn(victim) ? this.time + this.mode.respawnDelay(victim) : Infinity;
     if (this.coverOwners.size) for (const [index, owner] of this.coverOwners) if (owner === victim) this.coverOwners.delete(index);
@@ -999,7 +1025,7 @@ export class Game {
       const m = e.motor;
       const flags = (e.alive ? 1 : 0) | (m.sprinting ? 2 : 0) | (e.aim01 > 0.5 ? 4 : 0) | (m.grounded ? 8 : 0) | (e.ws.reloading ? 16 : 0) | (e.cloakUntil > this.time ? 32 : 0);
       const slot = e.ws.slots[e.ws.active];
-      ents.push([e.id, r2(m.x), r2(m.y), r2(m.z), r3(m.yaw), r3(m.pitch), r2(m.crouch), flags, slot ? slot.id : 'pistol', Math.ceil(e.hp)]);
+      ents.push([e.id, r2(m.x), r2(m.y), r2(m.z), r3(m.yaw), r3(m.pitch), r2(m.crouch), flags, slot ? slot.id : 'pistol', Math.ceil(e.hp), e.dance ? danceIndex(e.dance.id) : 0]);
     }
     const snap = { type: 'snap', t: r3(this.time), e: ents, m: this.hudState() };
     if (this.pickups.length) snap.pk = this.pickups.map((p) => [p.id, r2(p.x), r2(p.y), r2(p.z)]);
@@ -1023,6 +1049,7 @@ export class Game {
         pr: this.time < forEntity.protectUntil ? 1 : 0,
         a: packActor(forEntity),
         ck: forEntity.cloakUntil > this.time ? r2(forEntity.cloakUntil - this.time) : 0,
+        dn: forEntity.dance ? danceIndex(forEntity.dance.id) : 0,
       };
     }
     return snap;

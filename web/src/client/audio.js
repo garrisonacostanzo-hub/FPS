@@ -89,6 +89,40 @@ export class AudioEngine {
     src.start();
   }
 
+  /** Loops a buffer (emote music) until stop(); position null = non-positional (your own). */
+  playLoop(buffer, { volume = 0.5, position = null, maxDistance = 45 } = {}) {
+    if (!this.ensure() || !buffer) return null;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const gain = this.ctx.createGain();
+    gain.gain.value = volume;
+    let panner = null;
+    if (position) {
+      panner = this.ctx.createPanner();
+      panner.panningModel = 'equalpower';
+      panner.distanceModel = 'linear';
+      panner.refDistance = 3;
+      panner.maxDistance = maxDistance;
+      src.connect(gain).connect(panner).connect(this.master);
+    } else {
+      src.connect(gain).connect(this.master);
+    }
+    const setPosition = (p) => {
+      if (!panner || !p) return;
+      if (panner.positionX) { panner.positionX.value = p.x; panner.positionY.value = p.y; panner.positionZ.value = p.z; }
+      else panner.setPosition(p.x, p.y, p.z);
+    };
+    setPosition(position);
+    src.start();
+    return {
+      setPosition,
+      stop: () => {
+        try { gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08); src.stop(this.ctx.currentTime + 0.4); } catch { /* already stopped */ }
+      },
+    };
+  }
+
   gunshot(weaponId, position, local) {
     if (!this.ensure()) return;
     this.play(this.gunBuffer(weaponId), { volume: local ? 0.8 : 1, rate: 0.95 + Math.random() * 0.1, position: local ? null : position, maxDistance: 160 });

@@ -88,6 +88,10 @@ export class GameHost {
       case 'emote':
         this.game.emote(entity, String(msg.e || ''));
         break;
+      case 'dance':
+        if (msg.d) this.game.startDance(entity, String(msg.d));
+        else this.game.stopDance(entity);
+        break;
       case 'voice': {
         // Voice chat: remember this player's peer id (empty = left voice) and tell everyone who is in voice.
         const pid = String(msg.pid || '');

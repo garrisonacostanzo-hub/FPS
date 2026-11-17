@@ -11,7 +11,7 @@ export class Input {
     this.mouseButtons = 0;
     this.lookX = 0;
     this.lookY = 0;
-    this.latched = { jump: false, reload: false, slot: -1, cycle: 0, firePressed: false, scoreboard: false, chat: false, teamChat: false, emote: false };
+    this.latched = { jump: false, reload: false, slot: -1, cycle: 0, firePressed: false, scoreboard: false, chat: false, teamChat: false, emote: false, quick: false };
     this.crouchToggled = false;
     this.aimToggled = false;
     this.enabled = true;
@@ -154,6 +154,7 @@ export class Input {
         if (code === 'KeyT' || code === 'Enter') this.latched.chat = true;
         if (code === 'KeyY') this.latched.teamChat = true;
         if (code === 'KeyB') this.latched.emote = true;
+        if (code === 'KeyZ') this.latched.quick = true;
       }
       this.keys.add(code);
       if (['Space', 'ControlLeft', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(code)) e.preventDefault();

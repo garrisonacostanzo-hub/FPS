@@ -6,6 +6,8 @@ import { WEAPONS } from '../shared/weapons.js';
 import { Effects } from './gfx/effects.js';
 import { addFoliage } from './gfx/foliage.js';
 import { animateCamos, buildFirstPersonArms, buildGun, buildOperator, mat } from './gfx/models.js';
+import { applyDancePose, clearDancePose, dancePose } from './gfx/dancepose.js';
+import { danceById } from '../shared/dances.js';
 import { PostFX } from './gfx/post.js';
 import { buildSky } from './gfx/sky.js';
 import { surfaceTextures } from './gfx/textures.js';
@@ -258,6 +260,7 @@ class CharacterModel {
     if (this.label) this.label.visible = p.alive && !this.cloaked;
     if (this.cloaked) this.marker.visible = false;
     this.animateEmote(p);
+    this.animateDance();
     return speed;
   }
 
@@ -279,6 +282,23 @@ class CharacterModel {
     if (muzzle) muzzle.getWorldPosition(out);
     else out.set(this.root.position.x, this.root.position.y + 1.4, this.root.position.z);
     return out;
+  }
+
+  /** Emote dance (id, or null to stop). The gun arms hide and the free dance arms take over. */
+  setDance(id) {
+    if ((this.danceId || null) === (id || null)) return;
+    this.danceId = id || null;
+    this.danceStart = performance.now();
+    const dancing = !!this.danceId;
+    this.danceArms.visible = dancing;
+    this.armPivot.visible = !dancing;
+    if (!dancing) clearDancePose(this);
+  }
+
+  animateDance() {
+    if (!this.danceId) return;
+    const d = danceById(this.danceId);
+    applyDancePose(this, dancePose(this.danceId, (performance.now() - this.danceStart) / 1000, d ? d.bpm : 120));
   }
 
   /** Cloak: enemies see only a faint shimmer; teammates still see you. */
@@ -687,12 +707,29 @@ export class GameRenderer {
     }
     c.setMarker(markerVisible && pose.alive);
     c.setCloak(!!pose.cloak && pose.alive, !!info.ally);
+    c.setDance(pose.alive ? pose.dance : null);
     c.setRevealed(!!pose.revealed && pose.alive);
     const key = (labelText || '') + labelColor;
     if (c.labelKey !== key) { c.setLabel(labelText, labelColor); c.labelKey = key; }
     c.setWeapon(pose.weapon);
     c.tick();
     return c.update(pose, dt);
+  }
+
+  /** Your own character, shown only while you dance (the camera goes third-person). */
+  syncSelf(state) {
+    if (!state) { if (this.selfModel) this.selfModel.root.visible = false; return; }
+    const look = `${state.info.color}${state.info.outfit}${state.info.camo}`;
+    if (!this.selfModel || this.selfModel.look !== look) {
+      if (this.selfModel) this.selfModel.dispose(this.scene);
+      this.selfModel = new CharacterModel(this.scene, state.info, this.quality === 'low');
+      this.selfModel.look = look;
+    }
+    const m = this.selfModel;
+    m.root.visible = true;
+    m.setWeapon(state.pose.weapon);
+    m.setDance(state.dance);
+    m.update(state.pose, state.dt);
   }
 
   characterEmote(id, emote) {

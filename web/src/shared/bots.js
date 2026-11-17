@@ -101,6 +101,12 @@ export class BotBrain {
       this.perceptionTimer += interval;
     }
 
+    // A taunting bot finishes its dance unless someone shows up or shoots it (moving again ends the dance).
+    if (e.dance) {
+      if (this.now < (this.danceUntil || 0) && !this.targetVisible && this.now - this.lastDamaged > 0.5) return cmd;
+      this.danceUntil = 0;
+    }
+
     this.decisionTimer -= dt;
     if (this.decisionTimer <= 0) {
       this.decisionTimer = 0.22 + this.rng() * 0.12;

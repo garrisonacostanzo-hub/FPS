@@ -78,6 +78,7 @@ export const SETTINGS_SECTIONS = [
       { k: 'renderScale', label: 'Resolution', type: 'range', min: 0.5, max: 1, step: 0.05, fmt: pct, hint: 'Lower it if the game stutters.' },
       { k: 'dynamicResolution', label: 'Dynamic resolution (keeps the frame rate smooth)', type: 'check' },
       { k: 'volume', label: 'Volume', type: 'range', min: 0, max: 1, step: 0.05, fmt: pct },
+      { k: 'emoteMusic', label: 'Emote dance music', type: 'check' },
     ],
   },
 ];

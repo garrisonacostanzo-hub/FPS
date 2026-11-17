@@ -30,6 +30,7 @@ export const DEFAULTS = {
   // Voice chat in online matches.
   voiceChat: 'ptt',      // 'ptt' (hear everyone, hold V / 🎙 to talk) | 'open' (mic always on) | 'off'
   voiceVolume: 0.9,
+  emoteMusic: true,      // music while you or others do an emote dance
   // Touch controls (phones/tablets).
   touchControls: 'auto', // 'auto' | 'on' | 'off'
   aimButton: 'toggle',   // 'toggle' (tap to scope in / out, drag to look) | 'hold' (aim while held, drag to look)

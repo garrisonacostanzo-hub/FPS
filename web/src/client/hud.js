@@ -4,6 +4,7 @@ import { TEAM, TEAM_NAMES } from '../shared/constants.js';
 import { MODE_LIST } from '../shared/modes.js';
 import { ABILITIES } from '../shared/abilities.js';
 import { EMOTES } from '../shared/emotes.js';
+import { DANCES } from '../shared/dances.js';
 import { WEAPONS, WEAPON_SETS } from '../shared/weapons.js';
 import { saveSettings, settings } from './settings.js';
 import { RARITY } from '../shared/cosmetics.js';
@@ -17,7 +18,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class Hud {
-  constructor(root, { map, modeId, online, isHost, roomCode, palette, onLeave, onResume, onPlayAgain, onChat, onLoadout, onEmote, onScopeMode, onVoiceMute }) {
+  constructor(root, { map, modeId, online, isHost, roomCode, palette, onLeave, onResume, onPlayAgain, onChat, onLoadout, onEmote, onScopeMode, onVoiceMute, onWheelPage }) {
     this.root = root;
     this.map = map;
     this.modeId = modeId;
@@ -29,7 +30,7 @@ export class Hud {
     this.palette = palette;
     this.crossTarget = null;
     this.roomCode = roomCode || '';
-    this.callbacks = { onLeave, onResume, onPlayAgain, onChat, onLoadout, onEmote, onScopeMode, onVoiceMute };
+    this.callbacks = { onLeave, onResume, onPlayAgain, onChat, onLoadout, onEmote, onScopeMode, onVoiceMute, onWheelPage };
     this.root.innerHTML = TEMPLATE;
     this.root.classList.add('active');
     this.el = {
@@ -196,29 +197,51 @@ export class Hud {
   // ------------------------------------------------------------------------------------------------
   // Emote wheel (B)
   // ------------------------------------------------------------------------------------------------
-  showEmoteWheel(show, touch) {
+  /** The wheel: page 'emotes' (dances) or 'quick' (quick chat). */
+  showEmoteWheel(show, touch, page = 'emotes') {
     const el = this.root.querySelector('#emote-wheel');
     el.classList.toggle('open', show);
     el.classList.toggle('touch', !!touch);
-    const hint = el.querySelector('.ew-center small');
-    hint.textContent = touch ? 'Tap an emote' : 'Move the mouse to pick, let go of B (or click)';
-    if (!show) this.setEmoteSelection(-1);
-    if (show && !this._ewBound) {
+    if (!show) return;
+    this.wheelPage = page;
+    const items = page === 'quick' ? EMOTES : DANCES;
+    el.querySelector('.ew-items').innerHTML = items.map((em, i) => {
+      const a = (i / items.length) * Math.PI * 2;
+      return `<button class="ew-item ${page}" data-emote="${em.id}" style="left:calc(50% + ${(Math.sin(a) * 140).toFixed(1)}px);top:calc(50% - ${(Math.cos(a) * 140).toFixed(1)}px)"><i>${em.icon}</i><b>${esc((em.label || em.name).toUpperCase())}</b></button>`;
+    }).join('');
+    el.querySelectorAll('[data-wpage]').forEach((b) => b.classList.toggle('on', b.dataset.wpage === page));
+    el.querySelector('.ew-center small').textContent = touch ? 'Tap one' : `Point the mouse, let go of ${page === 'quick' ? 'Z' : 'B'} (or click) · scroll to switch`;
+    this.setEmoteSelection(-1, page);
+    el.querySelectorAll('[data-emote]').forEach((b) => b.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.callbacks.onEmote) this.callbacks.onEmote(b.dataset.emote);
+    }));
+    if (!this._ewBound) {
       this._ewBound = true;
-      el.querySelectorAll('[data-emote]').forEach((b) => b.addEventListener('pointerdown', (e) => {
+      el.querySelectorAll('[data-wpage]').forEach((b) => b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (this.callbacks.onEmote) this.callbacks.onEmote(b.dataset.emote);
+        if (this.callbacks.onWheelPage) this.callbacks.onWheelPage(b.dataset.wpage);
       }));
       el.addEventListener('pointerdown', (e) => { if (e.target === el && this.callbacks.onEmote) this.callbacks.onEmote(null); });
     }
   }
 
-  setEmoteSelection(index) {
+  setEmoteSelection(index, page = this.wheelPage) {
     const el = this.root.querySelector('#emote-wheel');
     el.querySelectorAll('.ew-item').forEach((b, i) => b.classList.toggle('on', i === index));
-    const em = EMOTES[index];
-    el.querySelector('.ew-center b').textContent = em ? `${em.icon} ${em.label}` : 'EMOTES';
+    const items = page === 'quick' ? EMOTES : DANCES;
+    const em = items[index];
+    el.querySelector('.ew-center b').textContent = em ? `${em.icon} ${(em.label || em.name).toUpperCase()}` : page === 'quick' ? 'QUICK CHAT' : 'EMOTES';
+  }
+
+  /** While you dance: what it is and how to stop. */
+  setDanceHint(dance, touch) {
+    const el = this.root.querySelector('#dance-hint');
+    if (!dance) { el.classList.remove('show'); return; }
+    el.innerHTML = `<b>${dance.icon} ${esc(dance.name.toUpperCase())}</b><small>${touch ? 'Drag to look around · move or shoot to stop' : 'Mouse to look around · move, jump or shoot to stop'}</small>`;
+    el.classList.add('show');
   }
 
   /** Your own emote (you can't see your own character in first person). */
@@ -245,7 +268,7 @@ export class Hud {
     const html = self + rows;
     if (html !== this._voiceHtml) { this._voiceHtml = html; el.innerHTML = html; }
     const hint = this.root.querySelector('#chat-hint');
-    const text = `T chat · Y team · B emotes${st.mode === 'ptt' ? ' · hold V to talk' : st.mode === 'open' ? ' · open mic' : ''}`;
+    const text = `T chat · Y team · B emotes · Z quick chat${st.mode === 'ptt' ? ' · hold V to talk' : st.mode === 'open' ? ' · open mic' : ''}`;
     if (hint.textContent !== text) hint.textContent = text;
   }
 
@@ -301,11 +324,12 @@ export class Hud {
   }
 
   /** Adds a line to the chat log. Lines fade after a while but come back while you are typing. */
-  chatMessage(name, text, team, teamOnly = false, bot = false) {
+  chatMessage(name, text, team, teamOnly = false, bot = false, quick = false) {
     const row = document.createElement('div');
     const color = team === TEAM.A || team === TEAM.B ? this.palette.team(team) : '#ddd';
     row.innerHTML = `${teamOnly ? '<em>[TEAM]</em> ' : ''}<b style="color:${color}">${esc(name)}${bot ? ' <small>BOT</small>' : ''}:</b> ${esc(text)}`;
     if (teamOnly) row.classList.add('team');
+    if (quick) row.classList.add('quick');
     this.el.chat.appendChild(row);
     while (this.el.chat.children.length > 12) this.el.chat.firstChild.remove();
     setTimeout(() => row.classList.add('fade'), 10000);
@@ -556,7 +580,7 @@ export class Hud {
         <label class="set"><span>Weapon set (next respawn)</span><select data-k="weaponSet" data-type="select">${setOptions}</select></label>
         <label class="set"><span>Special ability (next respawn)</span><select data-k="ability" data-type="select">${ABILITIES.map((a) => `<option value="${a.id}" ${settings.ability === a.id ? 'selected' : ''}>${a.icon} ${esc(a.name)} (${a.cooldown} s)</option>`).join('')}</select></label>
         ${this.online ? '<div class="voice-members"></div>' : ''}
-        <p class="sub keys">F ability · T chat · Y team chat · B emote wheel${this.online ? ' · V push to talk' : ''} · 1-4 weapons</p>
+        <p class="sub keys">F ability · T chat · Y team chat · B emotes · Z quick chat${this.online ? ' · V push to talk' : ''} · 1-4 weapons</p>
         ${renderSettingsSections({ inGame: true, open: [touchSettingsRelevant() ? 'touch' : 'mouse'] })}
       </div>`;
     bindSettingsControls(el, (k, value) => {
@@ -804,9 +828,11 @@ const TEMPLATE = `
   <div id="ability-note"></div>
   <div id="cloak-fx"></div>
   <div id="emote-wheel" aria-hidden="true">
-    ${EMOTES.map((em, i) => { const a = (i / EMOTES.length) * Math.PI * 2; return `<button class="ew-item" data-emote="${em.id}" style="left:calc(50% + ${(Math.sin(a) * 140).toFixed(1)}px);top:calc(50% - ${(Math.cos(a) * 140).toFixed(1)}px)"><i>${em.icon}</i><b>${em.label}</b></button>`; }).join('')}
-    <div class="ew-center"><b>EMOTES</b><small>Move the mouse to pick, let go of B</small></div>
+    <div class="ew-tabs"><button data-wpage="emotes">EMOTES <small>B</small></button><button data-wpage="quick">QUICK CHAT <small>Z</small></button></div>
+    <div class="ew-items"></div>
+    <div class="ew-center"><b>EMOTES</b><small></small></div>
   </div>
+  <div id="dance-hint"></div>
   <div id="self-emote"></div>
   <div id="ammo"><div id="weapon-name"></div><div class="count"><span id="ammo-mag">30</span><span class="sep">/</span><span id="ammo-reserve">120</span></div><div id="weapon-slots"></div></div>
   <div id="reload-bar"><div id="reload-fill"></div><span>RELOADING</span></div>
@@ -816,7 +842,7 @@ const TEMPLATE = `
   <div id="pause"></div>
   <div id="chat-log"></div>
   <div id="chat-box"><span id="chat-mode">ALL</span><input id="chat-input" maxlength="120" placeholder="Say something… (Enter to send)" autocomplete="off"><button id="chat-send">SEND</button></div>
-  <div id="chat-hint">T chat · Y team · B emotes</div>
+  <div id="chat-hint">T chat · Y team · B emotes · Z quick chat</div>
   <div id="netstats"></div>
   <div id="voice-panel"></div>
 `;

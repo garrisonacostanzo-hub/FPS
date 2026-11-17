@@ -13,7 +13,7 @@ A first-person shooter that is **a single file: `web/dist/VANGUARD.html`**. Down
 * **Weapon sets:** pick one of six fixed sets of four guns, and carry all four.
 * **Special abilities:** pick one of six (Dash, Stim, Frag Grenade, Smoke Grenade, Recon Pulse, Cloak) and use it with **F**.
 * **Ammo drops:** whoever dies drops all the ammo they had; walk over it to refill your guns.
-* **Emotes, text chat and voice chat:** an emote wheel on **B**, all and team chat, and push-to-talk voice in online matches.
+* **Emotes, quick chat, text chat and voice chat:** dance emotes with music on **B** (third-person camera), quick chat callouts on **Z**, all and team chat, and push-to-talk voice in online matches.
 * **Adaptive bots:** they get tougher the better you are and the more you play.
 * **62 skins:** 50 weapon camos (most earned in Ranked) and 12 operator outfits.
 * **Progression:** levels, XP and career stats, saved in cookies and browser storage.
@@ -66,9 +66,24 @@ Pick one ability (PLAY / ONLINE tabs, **ARMORY → ABILITIES**, or the pause men
 
 Abilities run through the same input commands as shooting, so they're predicted on your screen and checked by the host, and Dash stays smooth online. Bots get a random ability and use it when it suits the fight: Stim when hurt, Frag at mid range, Smoke when taking cover, Pulse when they've lost you, Cloak when flanking.
 
-## Emotes, chat and voice chat
+## Emotes, quick chat, text chat and voice chat
 
-**Emote wheel.** Hold **B** (or tap **😀** on a phone), then point the mouse at an emote and let go of B, or click it. Everyone near you sees it: a bubble over your head and a short animation (wave, nod, cheer, flex...). Your own emote shows at the bottom of your screen. The eight emotes are fixed: **Wave, GG, Nice, LOL, Cheer, Too Easy, Oops, Flex**. Bots emote and say "gg" too, so you see them offline.
+**Emotes (dances).** Hold **B** (or tap **😀** on a phone) for the emote wheel, point at a dance and let go (or click). Your character dances with its own music loop, and the camera swings out to third person so you can watch. Move the mouse (or drag) to circle the camera around you. Moving, jumping, crouching, shooting, aiming, reloading, switching weapons or using your ability stops the dance and puts you back in first person, looking where you were before. Everyone nearby sees the dance and hears the music from where you're standing. The eight dances are original:
+
+| Dance | Music |
+|---|---|
+| 🤖 **Robot** | Electro, 120 BPM |
+| 🕺 **Disco Fever** | Disco, 118 BPM |
+| 🎸 **Air Guitar** | Rock with distorted power chords, 140 BPM |
+| 🐔 **Chicken Strut** | Bouncy chiptune, 150 BPM |
+| 🌀 **Spin Cycle** | Techno, 128 BPM |
+| 🏆 **Victory Hops** | Fanfare, 110 BPM |
+| 👟 **Shuffle** | House, 124 BPM |
+| 🌊 **Arm Wave** | Lo-fi, 92 BPM |
+
+All the music is generated in the browser. Turn it off under Settings → Graphics & audio → *Emote dance music*. Bots dance too: winners celebrate at the end of a match, and now and then a bot taunts after a kill.
+
+**Quick chat.** Hold **Z** (or the **QUICK CHAT** tab of the wheel) for eight fixed callouts: **Hello!, GG!, Nice shot!, LOL, Let's go!, Too easy, Oops, Thanks!**. A bubble shows over your head with a small gesture, and the callout goes into the chat log for everyone. Bots use quick chat and say "gg" too.
 
 **Text chat.** Press **T** (or tap **💬**) to chat with everyone, or **Y** for team chat (team modes; marked **[TEAM]** and only sent to your team). **Tab** switches between the two while typing. Recent messages stay on screen for 10 seconds and come back while you type.
 
@@ -158,7 +173,7 @@ The same file has touch controls. They turn on automatically when you touch the 
 | Jump / reload | **JUMP** / **RELOAD** |
 | Switch weapon | Tap the weapon and ammo panel (⇄) to go to the next gun in your set |
 | Special ability | **⚡** button next to AIM (shows the seconds left while it recharges) |
-| Emote wheel / chat | **😀** / **💬** at the top right |
+| Emotes and quick chat / text chat | **😀** (tabs at the top switch between EMOTES and QUICK CHAT) / **💬** at the top right |
 | Push to talk (online) | Hold **🎙** (left side, shown when voice chat is on) |
 | Scoreboard / pause | **☰** / **II** at the top right |
 
@@ -224,7 +239,8 @@ Each map has team spawns, an FFA spawn set, three capture zones, cover points fo
 | Scoreboard | `Tab` |
 | Chat to everyone / team chat | `T` (or `Enter`) / `Y` (`Tab` while typing switches between them) |
 | Special ability | `F` |
-| Emote wheel | Hold `B`, move the mouse toward an emote, let go (or click) |
+| Emotes (dances) | Hold `B`, move the mouse toward a dance, let go (or click). Move, jump or shoot to stop |
+| Quick chat | Hold `Z`, move the mouse toward a callout, let go (or click). Scroll while the wheel is open to switch between the two |
 | Push to talk (online) | Hold `V` |
 | Pause / menu | `Esc` (has the **TOGGLE SCOPE** switch at the top) |
 
@@ -510,7 +526,8 @@ web/
    │  ├─ difficulty.js      # continuous bot levels (blends Recruit..Apex presets)
    │  ├─ ballistics.js      # bullet flight (velocity, drag, gravity), materials and penetration
    │  ├─ cosmetics.js       # 50 camos, 12 outfits, rarities, unlock rules, rank tiers, Showdown titles
-   │  ├─ emotes.js          # the eight emotes on the wheel
+   │  ├─ emotes.js          # the eight quick chat callouts
+   │  ├─ dances.js          # the eight dance emotes (ids, names, tempo)
    │  ├─ abilities.js       # the six special abilities and their tuning
    │  ├─ game.js            # authoritative match: entities, damage, lag comp, snapshots
    │  └─ host.js            # fixed-tick match host, client bindings, network messages
@@ -520,6 +537,8 @@ web/
       ├─ profile.js         # level/XP, stats, skill rating algorithm, Ranked SR, Showdown rating, unlocks
       ├─ social.js          # friend codes, presence, friend requests, squads, 1v1 challenges (peer-to-peer)
       ├─ voice.js           # voice chat: peer-to-peer mesh, push to talk, speaking indicators, mute
+      ├─ emotemusic.js      # step sequencer that synthesises each dance's music loop
+      ├─ gfx/dancepose.js   # dance animations for the operator rig
       ├─ netcheck.js        # CHECK CONNECTION: what a network blocks (matchmaking, direct, relay)
       ├─ ui/friendsTab.js   # FRIENDS tab, friend profiles and the squad bar
       ├─ ui/toasts.js       # pop-up notifications (requests, invites, challenges)

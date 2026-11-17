@@ -324,3 +324,45 @@ if (failures) process.exitCode = 1;
   console.log(`abilities: dash ${moved.toFixed(1)} m, stim -> ${Math.round(a.hp)} hp, frag left Bravo at ${b.alive ? Math.round(b.hp) + ' hp' : 'dead'}`);
   if (failures.length) { console.log('ABILITY FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('ability checks passed');
 }
+
+// ------------------------------------------------------------------------------------------------
+// Emote dances
+// ------------------------------------------------------------------------------------------------
+{
+  const failures = [];
+  const { GameHost: Host } = await import('../src/shared/host.js');
+  const { BTN } = await import('../src/shared/constants.js');
+  const { DANCES, danceAt } = await import('../src/shared/dances.js');
+  const host = new Host({ mode: 'tdm', map: 'outpost', bots: 6, difficulty: 'normal', scoreLimit: 3 }, { send: () => {} });
+  const a = host.join('a', 'Alpha', { set: 'assault', ability: 'dash' });
+  const b = host.join('b', 'Bravo', { set: 'assault', ability: 'dash' });
+  for (let t = 0; t < 6; t += 0.1) host.update(0.1);
+  const game = host.game;
+  let seq = 5000;
+  const cmd = (e, extra = {}) => game.processCommand(e, { s: ++seq, dt: 1 / 60, mx: 0, mz: 0, yaw: e.motor.yaw, pitch: 0, b: 0, sw: -1, r: false, vt: game.time, ...extra });
+  if (DANCES.length !== 8) failures.push(`expected 8 dances, got ${DANCES.length}`);
+  host.receive('a', { type: 'dance', d: 'robot' });
+  const row = (snap, id) => snap.e.find((r) => r[0] === id);
+  if (danceAt(row(game.snapshot(b), a.id)[10]) !== 'robot') failures.push('dance not visible to other players in snapshots');
+  if (game.snapshot(a).you.dn !== 1) failures.push('dance not confirmed to the dancer');
+  cmd(a); cmd(a, { yaw: a.motor.yaw + 1 }); // looking around does not stop it
+  if (!a.dance) failures.push('standing still / turning ended the dance');
+  cmd(a, { mz: 1 });
+  if (a.dance) failures.push('moving did not end the dance');
+  host.receive('a', { type: 'dance', d: 'nonsense' });
+  if (a.dance) failures.push('unknown dance id accepted');
+  game.lastDanceAt = 0; a.lastDance = -9;
+  host.receive('a', { type: 'dance', d: 'disco' });
+  cmd(a, { b: BTN.FIRE });
+  if (a.dance) failures.push('shooting did not end the dance');
+  a.lastDance = -9;
+  host.receive('a', { type: 'dance', d: 'shuffle' });
+  host.receive('a', { type: 'dance', d: null });
+  if (a.dance) failures.push('stop message did not end the dance');
+  // Winning bots celebrate with dances at the end of a match.
+  const team = [...game.entities.values()].find((e) => e.isBot).team;
+  game.finish({ team, text: 'TEST WINS' });
+  const dancing = [...game.entities.values()].filter((e) => e.isBot && e.dance).length;
+  console.log(`dances: robot visible to others, cancels on move/shoot; ${dancing} bots dancing after the win`);
+  if (failures.length) { console.log('DANCE FAILURES:\n  ' + failures.join('\n  ')); process.exitCode = 1; } else console.log('dance checks passed');
+}

@@ -694,3 +694,14 @@ html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-
 .m-set .ab-cd { font-style: normal; font-size: 11px; letter-spacing: 1.5px; font-weight: 700; color: var(--m-accent); }
 .m-set.on .ab-cd { color: #0b0c0e; }
 .ab-hero { font-size: 64px; line-height: 1; }
+.ew-tabs { position: absolute; left: 50%; top: calc(50% - 232px); transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
+.ew-tabs button { background: rgba(10,12,16,0.82); border: 1px solid rgba(255,255,255,0.22); border-radius: 999px; color: #fff; padding: 6px 14px; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; }
+.ew-tabs button small { opacity: 0.6; margin-left: 4px; }
+.ew-tabs button.on { background: var(--accent); color: #1a1205; border-color: var(--accent); }
+.ew-item.emotes { border-color: rgba(180,140,255,0.45); }
+#dance-hint { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); text-align: center; background: rgba(10,12,16,0.7); border-radius: 12px; padding: 6px 16px; color: #fff; display: none; pointer-events: none; }
+#dance-hint.show { display: block; }
+#dance-hint b { display: block; font-size: 18px; letter-spacing: 2px; }
+#dance-hint small { font-size: 12px; color: rgba(255,255,255,0.7); }
+#chat-log div.quick b { opacity: 0.95; }
+@media (max-height: 520px) { .ew-tabs { top: 8px; } }
